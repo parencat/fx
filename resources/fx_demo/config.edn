@@ -1,0 +1,8 @@
+{:duct.profile/base
+ {:duct.core/project-ns fx-demo}
+
+ :fx.module/autowire {}
+
+ :duct.profile/dev   #duct/include "dev"
+ :duct.profile/local #duct/include "local"
+ :duct.profile/prod  {}}
