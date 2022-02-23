@@ -1,8 +1,27 @@
-# fx-demo
+# FX framework
 
-FIXME: description
+Set of Duct modules for rapid clojure development
 
-## Developing
+## Modules
+
+### `:fx.module/autowire`  
+Module for scanning project namespaces for integrant keys and generating Duct config.
+You can use clojure metadata to create an integrant key:
+```clojure
+(defn ^:fx.module/autowire health-check [ctx req]
+  {:status :ok})
+```
+
+Also you can specify dependencies for your keys as arguments metadata:
+```clojure
+(defn status
+  {:fx.module/autowire :http-server/handler}
+  [^:fx.demo.something/db-connection db-connection]
+  {:status     :ok
+   :connection (db-connection)})
+```
+
+
 
 ### Setup
 
@@ -15,7 +34,7 @@ lein duct setup
 This will create files for local configuration, and prep your system
 for the project.
 
-### Environment
+## Developing
 
 To begin developing, start with a REPL.
 
@@ -23,7 +42,11 @@ To begin developing, start with a REPL.
 lein repl
 ```
 
-Then load the development environment.
+## Run demo project
+
+```sh
+lein repl
+```
 
 ```clojure
 user=> (dev)
@@ -34,20 +57,9 @@ Run `go` to prep and initiate the system.
 
 ```clojure
 dev=> (go)
-:duct.server.http.jetty/starting-server {:port 3000}
 :initiated
 ```
 
-By default this creates a web server at <http://localhost:3000>.
-
-When you make changes to your source files, use `reset` to reload any
-modified files and reset the server.
-
-```clojure
-dev=> (reset)
-:reloading (...)
-:resumed
-```
 
 ### Testing
 
@@ -64,7 +76,3 @@ But you can also run tests through Leiningen.
 ```sh
 lein test
 ```
-
-## Legal
-
-Copyright © 2022 FIXME

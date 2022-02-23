@@ -14,8 +14,9 @@
   {:connected :ok})
 
 
-(defn ^{:fx.module/autowire :http-server/handler}
-  status [^:fx.demo.something/db-connection db-connection]
+(defn status
+  {:fx.module/autowire :http-server/handler}
+  [^:fx.demo.something/db-connection db-connection]
   {:status     :ok
    :connection (db-connection)})
 

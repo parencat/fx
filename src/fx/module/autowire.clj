@@ -68,20 +68,3 @@
         components-config (prep-components-config components)]
     (fn [config]
       (merge config components-config))))
-
-
-
-
-(comment
- (->> (tools.find/find-namespaces (cp/classpath))
-      (filter (fn [ns] (-> ns (clojure.string/starts-with? "fx.demo")))))
-
- (find-project-namespaces 'fx-demo)
-
- (->> (find-project-namespaces 'fx-demo)
-      (find-components)
-      (prep-components-config))
-
- (require (symbol 'fx-demo.something) :reload)
- (meta ('status (ns-publics (symbol 'fx-demo.something))))
- (ns-resolve 'fx-demo.something 'health-check))
