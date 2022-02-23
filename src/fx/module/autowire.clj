@@ -1,4 +1,4 @@
-(ns modules.autowire
+(ns fx.module.autowire
   (:require [integrant.core :as ig]
             [clojure.java.classpath :as cp]
             [clojure.tools.namespace.find :as tools.find]))
@@ -34,9 +34,30 @@
                      parent-component (:fx.module/autowire comp-meta)
                      comp-key'        (if (keyword? parent-component)
                                         [parent-component comp-key]
-                                        comp-key)]
-                 (defmethod ig/init-key comp-key [_ _] comp-value)
-                 (assoc config comp-key' {})))
+                                        comp-key)
+                     params-keys      (some->> comp-value
+                                               meta
+                                               :arglists
+                                               first
+                                               (into [] (comp (map meta)
+                                                              (remove nil?)
+                                                              (mapcat keys)
+                                                              (filter namespace))))
+                     params-config    (reduce (fn [acc param]
+                                                (assoc acc (keyword (name param)) (ig/ref param)))
+                                              {}
+                                              params-keys)]
+
+                 (if (fn? (deref comp-value))
+                   (defmethod ig/init-key comp-key [_ params]
+                     (let [params-values (mapv #(get params (keyword (name %))) params-keys)]
+                       (fn [& comp-direct-params]
+                         (apply comp-value (concat params-values comp-direct-params)))))
+
+                   (defmethod ig/init-key comp-key [_ _]
+                     comp-value))
+
+                 (assoc config comp-key' params-config)))
              {}
              components))
 
@@ -53,7 +74,7 @@
 
 (comment
  (->> (tools.find/find-namespaces (cp/classpath))
-      (filter (fn [ns] (-> ns (clojure.string/starts-with? "fx-demo")))))
+      (filter (fn [ns] (-> ns (clojure.string/starts-with? "fx.demo")))))
 
  (find-project-namespaces 'fx-demo)
 
