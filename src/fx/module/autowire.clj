@@ -1,6 +1,7 @@
 (ns fx.module.autowire
   (:require [integrant.core :as ig]
             [clojure.java.classpath :as cp]
+            [clojure.string]
             [clojure.tools.namespace.find :as tools.find]))
 
 
@@ -32,6 +33,8 @@
   (reduce-kv (fn [config comp-key comp-value]
                (let [comp-meta        (meta comp-value)
                      parent-component (:fx.module/autowire comp-meta)
+                     halt-key         (:fx.module/halt-key comp-meta)
+                     wrap?            (:fx.module/wrap-fn comp-meta)
                      comp-key'        (if (keyword? parent-component)
                                         [parent-component comp-key]
                                         comp-key)
@@ -51,11 +54,18 @@
                  (if (fn? (deref comp-value))
                    (defmethod ig/init-key comp-key [_ params]
                      (let [params-values (mapv #(get params (keyword (name %))) params-keys)]
-                       (fn [& comp-direct-params]
-                         (apply comp-value (concat params-values comp-direct-params)))))
+                       (if wrap?
+                         (fn [& args]
+                           (apply comp-value (concat params-values args)))
+
+                         (apply comp-value params-values))))
 
                    (defmethod ig/init-key comp-key [_ _]
-                     comp-value))
+                     (deref comp-value)))
+
+                 (when (and (some? halt-key) (fn? halt-key))
+                   (defmethod ig/halt-key! comp-key [_ init-result]
+                     (halt-key init-result)))
 
                  (assoc config comp-key' params-config)))
              {}

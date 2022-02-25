@@ -10,7 +10,7 @@
 
 (def valid-config
   {:duct.profile/base  {:duct.core/project-ns 'test}
-   :fx.module/autowire {:project-ns 'fx.demo}})
+   :fx.module/autowire {:project-ns 'fx.demo.something}})
 
 
 (deftest autowire-config-prep

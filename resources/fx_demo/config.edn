@@ -1,9 +1,8 @@
 {:duct.profile/base
  {:duct.core/project-ns fx.demo}
 
- :fx.demo.todo/server   {}
- :fx.module/autowire    {:project-ns fx.demo}
+ :fx.module/autowire {:project-ns fx.demo}
 
- :duct.profile/dev      #duct/include "dev"
- :duct.profile/local    #duct/include "local"
- :duct.profile/prod     {}}
+ :duct.profile/dev   #duct/include "dev"
+ :duct.profile/local #duct/include "local"
+ :duct.profile/prod  {}}

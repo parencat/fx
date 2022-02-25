@@ -28,3 +28,11 @@
   (load "local"))
 
 (integrant.repl/set-prep! #(duct/prep-config (read-config) profiles))
+
+
+(comment
+ (go)
+ (reset)
+ (test)
+ (halt)
+ nil)
