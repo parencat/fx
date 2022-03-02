@@ -6,8 +6,14 @@ Set of Duct modules for rapid clojure development
 
 ### `:fx.module/autowire`
 
-Module for scanning project namespaces for integrant keys and generating Duct config. You can use clojure metadata to
-create an integrant key:
+Module for scanning project namespaces, converting your components to integrant keys and generating Duct config on the fly.
+You can use clojure metadata to mark functions or variables as system components:
+
+```clojure
+(def ^:fx.module/autowire db-connection
+  (jdbc/get-connection {:connection-uri "db-uri"
+                        :dbtype         "sqlite"}))
+```
 
 ```clojure
 (defn ^:fx.module/autowire health-check [ctx req]
@@ -17,12 +23,12 @@ create an integrant key:
 Also, you can specify dependencies for your keys as arguments metadata:
 
 ```clojure
-(defn status
-  {:fx.module/autowire :http-server/handler}
-  [^:fx.demo.something/db-connection db-connection]
+(defn ^:fx.module/autowire status
+  [^:my-namespace/db-connection db-connection]
   {:status     :ok
    :connection (db-connection)})
 ```
+Notice that components has a namespaced keys.
 
 Also, you can specify `:fx.module/wrap-fn true` to wrap a component for the later usage e.g.  
 without wrapping you have to return an anonymous function:
@@ -30,7 +36,7 @@ without wrapping you have to return an anonymous function:
 ```clojure
 (defn select-all-todo-handler
   {:fx.module/autowire true}
-  [^:fx.demo.todo/db-connection db _request-params]
+  [^:my-namespace/db-connection db _request-params]
   (fn [_]
     {:status  200
      :headers {"Content-Type" "application/json"}
@@ -43,11 +49,13 @@ with wrapping:
 (defn select-all-todo-handler
   {:fx.module/autowire true
    :fx.module/wrap-fn  true}
-  [^:fx.demo.todo/db-connection db _request-params]
+  [^:my-namespace/db-connection db _request-params]
   {:status  200
    :headers {"Content-Type" "application/json"}
    :body    (jdbc.sql/query db select-all-todo)})
 ```
+
+For full example check the `fx.demo.todo` namespace.
 
 ### Setup
 
