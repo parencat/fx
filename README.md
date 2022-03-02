@@ -31,7 +31,7 @@ Also, you can specify dependencies for your keys as arguments metadata:
 Notice that components has a namespaced keys.
 
 Also, you can specify `:fx.module/wrap-fn true` to wrap a component for the later usage e.g.  
-without wrapping you have to return an anonymous function:
+without wrapping you have to return an anonymous function which holds the dependencies as closures:
 
 ```clojure
 (defn select-all-todo-handler
@@ -43,7 +43,7 @@ without wrapping you have to return an anonymous function:
      :body    (jdbc.sql/query db select-all-todo)}))
 ```
 
-with wrapping:
+with wrapping your component will return the partially applied function:
 
 ```clojure
 (defn select-all-todo-handler
