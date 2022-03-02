@@ -1,7 +1,7 @@
 {:duct.profile/base
  {:duct.core/project-ns fx.demo}
 
- :fx.module/autowire {:project-ns fx.demo}
+ :fx.module/autowire {:root fx.demo}
 
  :duct.profile/dev   #duct/include "dev"
  :duct.profile/local #duct/include "local"

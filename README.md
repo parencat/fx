@@ -10,20 +10,20 @@ Module for scanning project namespaces, converting your components to integrant 
 You can use clojure metadata to mark functions or variables as system components:
 
 ```clojure
-(def ^:fx.module/autowire db-connection
+(def ^:fx/autowire db-connection
   (jdbc/get-connection {:connection-uri "db-uri"
                         :dbtype         "sqlite"}))
 ```
 
 ```clojure
-(defn ^:fx.module/autowire health-check [ctx req]
+(defn ^:fx/autowire health-check [ctx req]
   {:status :ok})
 ```
 
 Also, you can specify dependencies for your keys as arguments metadata:
 
 ```clojure
-(defn ^:fx.module/autowire status
+(defn ^:fx/autowire status
   [^:my-namespace/db-connection db-connection]
   {:status     :ok
    :connection (db-connection)})
@@ -35,7 +35,7 @@ without wrapping you have to return an anonymous function which holds the depend
 
 ```clojure
 (defn select-all-todo-handler
-  {:fx.module/autowire true}
+  {:fx/autowire true}
   [^:my-namespace/db-connection db _request-params]
   (fn [_]
     {:status  200
@@ -47,8 +47,8 @@ with wrapping your component will return the partially applied function:
 
 ```clojure
 (defn select-all-todo-handler
-  {:fx.module/autowire true
-   :fx.module/wrap-fn  true}
+  {:fx/autowire true
+   :fx/wrap     true}
   [^:my-namespace/db-connection db _request-params]
   {:status  200
    :headers {"Content-Type" "application/json"}

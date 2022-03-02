@@ -5,15 +5,20 @@
             [clojure.tools.namespace.find :as tools.find]))
 
 
-(defn find-project-namespaces [ns]
+(def ^:const AUTOWIRED-KEY :fx/autowire)
+(def ^:const HALT-KEY :fx/halt)
+(def ^:const WRAP-KEY :fx/wrap)
+
+
+(defn find-project-namespaces [root-ns]
   (->> (cp/classpath)
        tools.find/find-namespaces
-       (filter #(clojure.string/starts-with? % (str ns)))))
+       (filter #(clojure.string/starts-with? % (str root-ns)))))
 
 
 (defn collect-autowired [ns autowired item-key item-val]
   (let [item-meta (meta item-val)]
-    (if (some? (:fx.module/autowire item-meta))
+    (if (some? (get item-meta AUTOWIRED-KEY))
       (assoc autowired (keyword ns (str item-key)) item-val)
       autowired)))
 
@@ -29,27 +34,30 @@
        (apply merge)))
 
 
+(def meta->namespaced-keywords
+  (comp (map meta)
+        (remove nil?)
+        (mapcat keys)
+        (filter namespace)))
+
+
+(defn get-comp-deps [component-meta]
+  (some->> component-meta
+           :arglists
+           first    ;; @TODO add support for multi-args functions
+           (into [] meta->namespaced-keywords)))
+
+
 (defn prep-components-config [components]
   (reduce-kv (fn [config comp-key comp-value]
-               (let [comp-meta        (meta comp-value)
-                     parent-component (:fx.module/autowire comp-meta)
-                     halt-key         (:fx.module/halt-key comp-meta)
-                     wrap?            (:fx.module/wrap-fn comp-meta)
-                     comp-key'        (if (keyword? parent-component)
-                                        [parent-component comp-key]
-                                        comp-key)
-                     params-keys      (some->> comp-value
-                                               meta
-                                               :arglists
-                                               first
-                                               (into [] (comp (map meta)
-                                                              (remove nil?)
-                                                              (mapcat keys)
-                                                              (filter namespace))))
-                     params-config    (reduce (fn [acc param]
-                                                (assoc acc (keyword (name param)) (ig/ref param)))
-                                              {}
-                                              params-keys)]
+               (let [comp-meta     (meta comp-value)
+                     halt-key      (get comp-meta HALT-KEY)
+                     wrap?         (get comp-meta WRAP-KEY)
+                     params-keys   (get-comp-deps comp-meta)
+                     params-config (reduce (fn [acc param]
+                                             (assoc acc (keyword (name param)) (ig/ref param)))
+                                           {}
+                                           params-keys)]
 
                  (if (fn? (deref comp-value))
                    (defmethod ig/init-key comp-key [_ params]
@@ -67,13 +75,13 @@
                    (defmethod ig/halt-key! comp-key [_ init-result]
                      (halt-key init-result)))
 
-                 (assoc config comp-key' params-config)))
+                 (assoc config comp-key params-config)))
              {}
              components))
 
 
-(defmethod ig/init-key :fx.module/autowire [_ {:keys [project-ns]}]
-  (let [pns               (find-project-namespaces project-ns)
+(defmethod ig/init-key :fx.module/autowire [_ {:keys [root]}]
+  (let [pns               (find-project-namespaces root)
         components        (find-components pns)
         components-config (prep-components-config components)]
     (fn [config]

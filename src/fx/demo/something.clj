@@ -1,30 +1,30 @@
 (ns fx.demo.something)
 
 
-(def ^:fx.module/autowire constant-value
+(def ^:fx/autowire constant-value
   {:connected :ok})
 
 
-(defn ^:fx.module/autowire health-check []
+(defn ^:fx/autowire health-check []
   (fn [ctx req]
     {:status :ok}))
 
 
-(defn ^{:fx.module/autowire true}
+(defn ^{:fx/autowire true}
   db-connection []
   (fn []
     {:connected :ok}))
 
 
 (defn status
-  {:fx.module/autowire :http-server/handler}
+  {:fx/autowire true}
   [^:fx.demo.something/db-connection db-connection]
   (fn []
     {:status     :ok
      :connection (db-connection)}))
 
 
-(defn ^{:fx.module/autowire :http-server/handler}
+(defn ^{:fx/autowire true}
   other-handler [^:fx.demo.something/db-connection db-connection]
   (fn []
     {:status     :fail

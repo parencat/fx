@@ -23,8 +23,8 @@
   (.close connection))
 
 
-(def ^{:fx.module/autowire true
-       :fx.module/halt-key close-connection}
+(def ^{:fx/autowire true
+       :fx/halt     close-connection}
   db-connection
   (jdbc/get-connection {:connection-uri db-uri
                         :dbtype         "sqlite"}))
@@ -39,7 +39,7 @@
 
 
 (defn create-table
-  {:fx.module/autowire true}
+  {:fx/autowire true}
   [^:fx.demo.todo/db-connection db]
   (jdbc/execute! db todo-table))
 
@@ -50,8 +50,8 @@
 
 
 (defn select-all-todo-handler
-  {:fx.module/autowire true
-   :fx.module/wrap-fn  true}
+  {:fx/autowire true
+   :fx/wrap     true}
   [^:fx.demo.todo/db-connection db _request-params]
   {:status  200
    :headers {"Content-Type" "application/json"}
@@ -65,8 +65,8 @@
 
 
 (defn update-todo-handler
-  {:fx.module/autowire true
-   :fx.module/wrap-fn  true}
+  {:fx/autowire true
+   :fx/wrap     true}
   [^:fx.demo.todo/db-connection db {:strs [id done]}]
   {:status  200
    :headers {"Content-Type" "application/json"}
@@ -80,8 +80,8 @@
 
 
 (defn insert-todo-handler
-  {:fx.module/autowire true
-   :fx.module/wrap-fn  true}
+  {:fx/autowire true
+   :fx/wrap     true}
   [^:fx.demo.todo/db-connection db {:strs [title]}]
   {:status  200
    :headers {"Content-Type" "application/json"}
@@ -89,7 +89,7 @@
 
 
 (defn routes
-  {:fx.module/autowire true}
+  {:fx/autowire true}
   [^:fx.demo.todo/select-all-todo-handler select-all-todo-handler
    ^:fx.demo.todo/update-todo-handler update-todo-handler
    ^:fx.demo.todo/insert-todo-handler insert-todo-handler]
@@ -105,8 +105,8 @@
 
 
 (defn server
-  {:fx.module/autowire true
-   :fx.module/halt-key stop-server}
+  {:fx/autowire true
+   :fx/halt     stop-server}
   [^:fx.demo.todo/routes app]
   (jetty/run-jetty
    (-> app

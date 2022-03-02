@@ -28,7 +28,8 @@
              :resource-paths ["dev/resources"]
              :dependencies   [[integrant/repl "0.3.2"]
                               [hawk "0.2.11"]
-                              [eftest "0.5.9"]]}
+                              [eftest "0.5.9"]
+                              [vvvvalvalval/scope-capture "0.3.2"]]}
 
    :repl    {:prep-tasks   ^:replace ["javac" "compile"]
              :repl-options {:init-ns user}}
