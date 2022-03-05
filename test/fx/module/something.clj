@@ -1,4 +1,4 @@
-(ns fx.demo.something)
+(ns fx.module.something)
 
 
 (def ^:fx/autowire constant-value
@@ -18,14 +18,14 @@
 
 (defn status
   {:fx/autowire true}
-  [^:fx.demo.something/db-connection db-connection]
+  [^:fx.module.something/db-connection db-connection]
   (fn []
     {:status     :ok
      :connection (db-connection)}))
 
 
 (defn ^{:fx/autowire true}
-  other-handler [^:fx.demo.something/db-connection db-connection]
+  other-handler [^:fx.module.something/db-connection db-connection]
   (fn []
     {:status     :fail
      :connection (db-connection)}))

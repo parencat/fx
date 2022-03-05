@@ -10,7 +10,7 @@
 
 (def valid-config
   {:duct.profile/base  {:duct.core/project-ns 'test}
-   :fx.module/autowire {:root 'fx.demo.something}})
+   :fx.module/autowire {:root 'fx.module.something}})
 
 
 (deftest autowire-config-prep
@@ -18,15 +18,15 @@
         system (integrant/init config)]
 
     (testing "basic component"
-      (is (some? (:fx.demo.something/health-check system)))
+      (is (some? (:fx.module.something/health-check system)))
       (is (= {:status :ok}
-             ((:fx.demo.something/health-check system) {} {}))))
+             ((:fx.module.something/health-check system) {} {}))))
 
     (testing "parent - child component"
-      (is (some? (get system :fx.demo.something/status)))
+      (is (some? (get system :fx.module.something/status)))
       (is (= {:status     :ok
               :connection {:connected :ok}}
-             ((get system :fx.demo.something/status)))))
+             ((get system :fx.module.something/status)))))
 
     (integrant/halt! system)))
 
@@ -36,15 +36,15 @@
         system (integrant/init config)]
 
     (testing "dependency injection configured properly"
-      (let [status-handler-conf (get config :fx.demo.something/status)
-            db-connection-conf  (:fx.demo.something/db-connection config)]
+      (let [status-handler-conf (get config :fx.module.something/status)
+            db-connection-conf  (:fx.module.something/db-connection config)]
         (is (some? (:db-connection status-handler-conf)))
         (is (integrant/ref? (:db-connection status-handler-conf)))
 
         (is (some? db-connection-conf))
 
         (testing "components return correct results"
-          (let [status-handler (get system :fx.demo.something/status)]
+          (let [status-handler (get system :fx.module.something/status)]
             (is (= {:status     :ok
                     :connection {:connected :ok}}
                    (status-handler)))))))

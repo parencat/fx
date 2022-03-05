@@ -1,4 +1,4 @@
-(ns fx.demo.todo-test
+(ns todo.core-test
   (:require [clojure.test :refer :all]
             [duct.core :as duct]
             [integrant.core :as integrant]
@@ -54,11 +54,13 @@
         (is (= (:todo/title todo) "test todo"))
 
         (http/put "http://localhost:3000/todos"
-                  {:query-params {:id (:todo/id todo) :done true}})
-        (let [new-todo (-> (http/get "http://localhost:3000/todos")
-                           :body
-                           (cheshire/parse-string true)
-                           first)]
-          (is (= (:todo/done new-todo) 1)))))
+                  {:query-params {:id (:todo/id todo) :done true}}))
+
+      (let [new-todo (-> (http/get "http://localhost:3000/todos")
+                         :body
+                         (cheshire/parse-string true)
+                         first)]
+        (is (= (:todo/done new-todo) 1))))
 
     (integrant/halt! system)))
+

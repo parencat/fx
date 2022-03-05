@@ -1,4 +1,4 @@
-(ns fx.demo.todo
+(ns todo.core
   (:require [ring.adapter.jetty :as jetty]
             [next.jdbc :as jdbc]
             [next.jdbc.sql :as jdbc.sql]
@@ -40,7 +40,7 @@
 
 (defn create-table
   {:fx/autowire true}
-  [^:fx.demo.todo/db-connection db]
+  [^:todo.core/db-connection db]
   (jdbc/execute! db todo-table))
 
 
@@ -52,7 +52,7 @@
 (defn select-all-todo-handler
   {:fx/autowire true
    :fx/wrap     true}
-  [^:fx.demo.todo/db-connection db _request-params]
+  [^:todo.core/db-connection db _request-params]
   {:status  200
    :headers {"Content-Type" "application/json"}
    :body    (jdbc.sql/query db select-all-todo)})
@@ -67,7 +67,7 @@
 (defn update-todo-handler
   {:fx/autowire true
    :fx/wrap     true}
-  [^:fx.demo.todo/db-connection db {:strs [id done]}]
+  [^:todo.core/db-connection db {:strs [id done]}]
   {:status  200
    :headers {"Content-Type" "application/json"}
    :body    (jdbc/execute! db (update-todo id (get {"true" true "false" false} done)))})
@@ -82,7 +82,7 @@
 (defn insert-todo-handler
   {:fx/autowire true
    :fx/wrap     true}
-  [^:fx.demo.todo/db-connection db {:strs [title]}]
+  [^:todo.core/db-connection db {:strs [title]}]
   {:status  200
    :headers {"Content-Type" "application/json"}
    :body    (jdbc/execute! db (insert-todo title))})
@@ -90,9 +90,9 @@
 
 (defn routes
   {:fx/autowire true}
-  [^:fx.demo.todo/select-all-todo-handler select-all-todo-handler
-   ^:fx.demo.todo/update-todo-handler update-todo-handler
-   ^:fx.demo.todo/insert-todo-handler insert-todo-handler]
+  [^:todo.core/select-all-todo-handler select-all-todo-handler
+   ^:todo.core/update-todo-handler update-todo-handler
+   ^:todo.core/insert-todo-handler insert-todo-handler]
   (compojure/routes
    (compojure/GET "/todos" [] select-all-todo-handler)
    (compojure/POST "/todos" {:keys [query-params]} (insert-todo-handler query-params))
@@ -107,7 +107,7 @@
 (defn server
   {:fx/autowire true
    :fx/halt     stop-server}
-  [^:fx.demo.todo/routes app]
+  [^:todo.core/routes app]
   (jetty/run-jetty
    (-> app
        (params/wrap-params)
