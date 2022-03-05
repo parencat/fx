@@ -15,7 +15,9 @@
 
   :deploy-repositories
   [["clojars" {:sign-releases false
-               :url           "https://clojars.org/repo"}]]
+               :url           "https://clojars.org/repo"
+               :username      :env/CLOJARS_USERNAME
+               :password      :env/CLOJARS_PASSWORD}]]
 
   :release-tasks
   [["vcs" "assert-committed"]
