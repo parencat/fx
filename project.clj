@@ -1,4 +1,4 @@
-(defproject fx/modules "0.1.0-SNAPSHOT"
+(defproject kleene_ai/fx "0.1.0-SNAPSHOT"
   :description "Set of Duct modules for rapid clojure development"
   :url "https://github.com/Minoro-Ltd/fx-demo"
 
