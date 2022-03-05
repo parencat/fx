@@ -1,4 +1,4 @@
-(defproject fx/modules "0.1.0"
+(defproject fx/modules "0.1.0-SNAPSHOT"
   :description "Set of Duct modules for rapid clojure development"
   :url "https://github.com/Minoro-Ltd/fx-demo"
 
@@ -11,4 +11,20 @@
                  [integrant "0.8.0"]]
 
   :profiles
-  {:dev {:dependencies [[vvvvalvalval/scope-capture "0.3.2"]]}})
+  {:dev {:dependencies [[vvvvalvalval/scope-capture "0.3.2"]]}}
+
+  :deploy-repositories
+  [["clojars" {:sign-releases false
+               :url           "https://clojars.org/repo"
+               :username      :env/CLOJARS_USERNAME
+               :password      :env/CLOJARS_PASSWORD}]]
+
+  :release-tasks
+  [["vcs" "assert-committed"]
+   ["change" "version" "leiningen.release/bump-version" "release"]
+   ["vcs" "commit"]
+   ["vcs" "tag" "--no-sign"]
+   ["deploy" "clojars"]
+   ["change" "version" "leiningen.release/bump-version"]
+   ["vcs" "commit"]
+   ["vcs" "push"]])
