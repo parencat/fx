@@ -14,14 +14,15 @@
 (defonce ids*
   (atom 1))
 
-
 (def db-uri
   "jdbc:sqlite::memory:")
 
 
+
+
+;; db connection
 (defn close-connection [^Connection connection]
   (.close connection))
-
 
 (def ^{:fx/autowire true
        :fx/halt     close-connection}
@@ -30,6 +31,9 @@
                         :dbtype         "sqlite"}))
 
 
+
+
+;; business logic
 (def todo-table
   (sql/format {:create-table :todo
                :with-columns
@@ -38,15 +42,30 @@
                 [:done :boolean [:not nil false]]]}))
 
 
-(defn create-table
-  {:fx/autowire true}
-  [^:todo.core/db-connection db]
-  (jdbc/execute! db todo-table))
+(defn insert-todo [title]
+  (let [id (swap! ids* inc)]
+    (sql/format {:insert-into :todo
+                 :values      [[id title false]]})))
 
 
 (def select-all-todo
   (sql/format {:select :*
                :from   :todo}))
+
+
+(defn update-todo [id done]
+  (sql/format {:update :todo
+               :set    {:done done}
+               :where  [:= :id id]}))
+
+
+
+
+;; http handlers
+(defn create-table
+  {:fx/autowire true}
+  [^:todo.core/db-connection db]
+  (jdbc/execute! db todo-table))
 
 
 (defn select-all-todo-handler
@@ -58,12 +77,6 @@
    :body    (jdbc.sql/query db select-all-todo)})
 
 
-(defn update-todo [id done]
-  (sql/format {:update :todo
-               :set    {:done done}
-               :where  [:= :id id]}))
-
-
 (defn update-todo-handler
   {:fx/autowire true
    :fx/wrap     true}
@@ -71,12 +84,6 @@
   {:status  200
    :headers {"Content-Type" "application/json"}
    :body    (jdbc/execute! db (update-todo id (get {"true" true "false" false} done)))})
-
-
-(defn insert-todo [title]
-  (let [id (swap! ids* inc)]
-    (sql/format {:insert-into :todo
-                 :values      [[id title false]]})))
 
 
 (defn insert-todo-handler
@@ -88,6 +95,9 @@
    :body    (jdbc/execute! db (insert-todo title))})
 
 
+
+
+;; routes
 (defn routes
   {:fx/autowire true}
   [^:todo.core/select-all-todo-handler select-all-todo-handler
@@ -100,9 +110,11 @@
    (route/not-found "<h1>Page not found</h1>")))
 
 
+
+
+;; http server
 (defn stop-server [^Server jetty-server]
   (.stop jetty-server))
-
 
 (defn server
   {:fx/autowire true

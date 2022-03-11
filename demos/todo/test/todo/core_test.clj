@@ -2,7 +2,6 @@
   (:require [clojure.test :refer :all]
             [duct.core :as duct]
             [integrant.core :as integrant]
-            [fx.module.autowire]
             [next.jdbc :as jdbc]
             [clj-http.client :as http]
             [cheshire.core :as cheshire])
@@ -15,7 +14,7 @@
 
 (def valid-config
   {:duct.profile/base  {:duct.core/project-ns 'test}
-   :fx.module/autowire {:root 'fx.demo.todo}})
+   :fx.module/autowire {:root 'todo}})
 
 
 (def todo-table-query
@@ -27,8 +26,8 @@
         system (integrant/init config)]
 
     (testing "todo components initialized successfully"
-      (let [server     (:fx.demo.todo/server system)
-            connection (:fx.demo.todo/db-connection system)
+      (let [server     (:todo.core/server system)
+            connection (:todo.core/db-connection system)
             todo-table (jdbc/execute-one! connection todo-table-query)]
         (is (instance? Server server))
         (is (instance? Connection connection))

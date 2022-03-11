@@ -4,7 +4,7 @@
 
   :dependencies [[org.clojure/clojure "1.10.3"]
                  [duct/core "0.8.0"]
-                 [fx.module/autowire "0.0.1"]
+                 [org.clojars.tka4enko/fx "0.1.0"]
                  [ring "1.9.5"]
                  [ring/ring-json "0.5.1"]
                  [compojure "1.6.2"]
@@ -20,10 +20,12 @@
   :repl-options {:init-ns todo.core}
 
   :profiles
-  {:dev     {:dependencies [[integrant/repl "0.3.2"]
-                            [hawk "0.2.11"]
-                            [eftest "0.5.9"]
-                            [clj-http "3.12.3"]
-                            [cheshire "5.10.2"]]}
+  {:dev     {:source-paths   ["dev/src"]
+             :resource-paths ["dev/resources"]
+             :dependencies   [[integrant/repl "0.3.2"]
+                              [hawk "0.2.11"]
+                              [eftest "0.5.9"]
+                              [clj-http "3.12.3"]
+                              [cheshire "5.10.2"]]}
 
    :uberjar {:aot :all}})

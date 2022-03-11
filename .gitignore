@@ -7,11 +7,13 @@ pom.xml.asc
 *.jar
 *.class
 /.lein-*
-/.nrepl-port
-/.dir-locals.el
-/profiles.clj
+.nrepl-port
+.dir-locals.el
+profiles.clj
+
 /dev/resources/local.edn
 /dev/src/local.clj
-/.idea
+
+.idea
 *.iml
 .clj-kondo
