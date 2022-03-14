@@ -42,10 +42,15 @@
 
 
 (defn get-comp-deps [component-meta]
-  (some->> component-meta
-           :arglists
-           first    ;; @TODO add support for multi-args functions
-           (into [] meta->namespaced-keywords)))
+  (let [arslists (:arglists component-meta)]
+    (if (and (seq arslists)
+             (> (count arslists) 1))
+      (throw (ex-info "Multi-arity functions not supported by autowire module"
+                      {:actual-arslists-count   (count arslists)
+                       :expected-arslists-count 1}))
+      (some->> arslists
+               first
+               (into [] meta->namespaced-keywords)))))
 
 
 (defn prep-components-config [components]
