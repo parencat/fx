@@ -56,6 +56,7 @@
 (defn prep-components-config [components]
   (reduce-kv (fn [config comp-key comp-value]
                (let [comp-meta     (meta comp-value)
+                     parent        (get comp-meta AUTOWIRED-KEY)
                      halt-key      (get comp-meta HALT-KEY)
                      wrap?         (get comp-meta WRAP-KEY)
                      params-keys   (get-comp-deps comp-meta)
@@ -64,23 +65,31 @@
                                            {}
                                            params-keys)]
 
-                 (if (fn? (deref comp-value))
-                   (defmethod ig/init-key comp-key [_ params]
-                     (let [params-values (mapv #(get params (keyword (name %))) params-keys)]
-                       (if wrap?
-                         (fn [& args]
-                           (apply comp-value (concat params-values args)))
+                 ;; inject component in config
+                 (if (keyword? parent)
+                   (assoc config [parent comp-key] (deref comp-value))
 
-                         (apply comp-value params-values))))
+                   (do
+                     (if (fn? (deref comp-value))
+                       ;; component is function
+                       (defmethod ig/init-key comp-key [_ params]
+                         (let [params-values (mapv #(get params (keyword (name %))) params-keys)]
+                           (if wrap?
+                             (fn [& args]
+                               (apply comp-value (concat params-values args)))
 
-                   (defmethod ig/init-key comp-key [_ _]
-                     (deref comp-value)))
+                             (apply comp-value params-values))))
 
-                 (when (and (some? halt-key) (fn? halt-key))
-                   (defmethod ig/halt-key! comp-key [_ init-result]
-                     (halt-key init-result)))
+                       ;; component is a constant value
+                       (defmethod ig/init-key comp-key [_ _]
+                         (deref comp-value)))
 
-                 (assoc config comp-key params-config)))
+                     ;; add halt method if needed
+                     (when (and (some? halt-key) (fn? halt-key))
+                       (defmethod ig/halt-key! comp-key [_ init-result]
+                         (halt-key init-result)))
+
+                     (assoc config comp-key params-config)))))
              {}
              components))
 
