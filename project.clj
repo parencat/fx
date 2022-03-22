@@ -8,7 +8,8 @@
                  [org.clojure/tools.namespace "1.2.0"]
                  [org.clojure/java.classpath "1.0.0"]
                  [duct/core "0.8.0"]
-                 [integrant "0.8.0"]]
+                 [integrant "0.8.0"]
+                 [com.github.seancorfield/next.jdbc "1.2.772"]]
 
   :profiles
   {:dev {:dependencies [[vvvvalvalval/scope-capture "0.3.2"]]}}

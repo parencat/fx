@@ -1,1 +1,2 @@
-{:fx.module/autowire [:duct/module]}
+{:fx.module/autowire [:duct/module]
+ :fx.module/entity   [:duct/module]}

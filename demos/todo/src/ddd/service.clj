@@ -27,17 +27,23 @@
 
 (comment
 
- ;; inject to autowired functions
- ;; cross entities dependencies
+ ;; inject to autowired functions +
+ ;; cross entities dependencies +
+
+ ;; change autowire to allways use find-derived for component dependencies
+
+ ;; parse table definition
 
  ;; create ddl from entities
  ;; ddl changes strategies
  ;; apply ddl changes to the DB
 
+ ;; finish Entity record implementation
+
  ;; how to configure DB driver
 
  ;; implement common repo protocols (find, find-all, save, delete)
- ;; lazy data fetching
+ ;; lazy data fetching (optional)
 
  ;; tests
 

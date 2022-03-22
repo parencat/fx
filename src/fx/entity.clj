@@ -3,20 +3,20 @@
    [integrant.core :as ig]))
 
 (defprotocol PRepository
-  (create! [])
-  (update! [])
-  (find! [])
-  (find-all! [])
-  (delete! []))
+  (create! [_])
+  (update! [_])
+  (find! [_])
+  (find-all! [_])
+  (delete! [_]))
 
 
 (defrecord Entity []
   PRepository
-  (create! [])
-  (update! [])
-  (find! [])
-  (find-all! [])
-  (delete! []))
+  (create! [_])
+  (update! [_])
+  (find! [_])
+  (find-all! [_])
+  (delete! [_]))
 
 
 (defmethod ig/init-key :fx/entity [_ config]
