@@ -1,8 +1,9 @@
 (ns fx.module.autowire
-  (:require [integrant.core :as ig]
-            [clojure.java.classpath :as cp]
-            [clojure.string]
-            [clojure.tools.namespace.find :as tools.find]))
+  (:require
+   [integrant.core :as ig]
+   [clojure.java.classpath :as cp]
+   [clojure.string]
+   [clojure.tools.namespace.find :as tools.find]))
 
 
 (def ^:const AUTOWIRED-KEY :fx/autowire)

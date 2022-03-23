@@ -1,7 +1,8 @@
 (ns fx.parent-test
-  (:require [clojure.test :refer :all]
-            [duct.core :as duct]
-            [integrant.core :as ig]))
+  (:require
+   [clojure.test :refer :all]
+   [duct.core :as duct]
+   [integrant.core :as ig]))
 
 
 (duct/load-hierarchy)
@@ -9,7 +10,7 @@
 
 (def simple-config
   {:duct.profile/base  {:duct.core/project-ns 'test}
-   :fx.module/autowire {:root 'fx}})
+   :fx.module/autowire {:root 'fx.parent-test}})
 
 
 (defmethod ig/init-key :fx/parent [_ config]
