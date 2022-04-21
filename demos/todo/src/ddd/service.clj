@@ -30,7 +30,7 @@
  ;; inject to autowired functions +
  ;; cross entities dependencies +
 
- ;; change autowire to allways use find-derived for component dependencies
+ ;; change autowire to always use find-derived for component dependencies
 
  ;; parse table definition
 

@@ -2,7 +2,7 @@
 
 
 (defprotocol PRepository
-  (create! [_])
+  (create! [_ params])
   (update! [_])
   (find! [_])
   (find-all! [_])

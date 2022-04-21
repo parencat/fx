@@ -43,13 +43,13 @@
 
 
 (defn get-comp-deps [component-meta]
-  (let [arslists (:arglists component-meta)]
-    (if (and (seq arslists)
-             (> (count arslists) 1))
+  (let [arglists (:arglists component-meta)]
+    (if (and (seq arglists)
+             (> (count arglists) 1))
       (throw (ex-info "Multi-arity functions not supported by autowire module"
-                      {:actual-arslists-count   (count arslists)
-                       :expected-arslists-count 1}))
-      (some->> arslists
+                      {:actual-arglists-count   (count arglists)
+                       :expected-arglists-count 1}))
+      (some->> arglists
                first
                (into [] meta->namespaced-keywords)))))
 
