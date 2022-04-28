@@ -7,14 +7,18 @@
    [honey.sql :as sql]))
 
 
-(defrecord Entity [database create]
+(defrecord Entity [database table]
   repo/PRepository
-  (create! [_ params]
-    (let [query (-> (:statement create)
-                    (assoc :columns (:columns create))
-                    (assoc :values [((apply juxt (:columns create)) params)])
-                    (sql/format))]
+  (create! [_ entity]
+    (let [table-name  (get-in table [:props :name])
+          columns     (mapv :name (:fields table))
+          get-values (apply juxt columns)
+          query       (-> {:insert-into table-name}
+                          (assoc :columns columns)
+                          (assoc :values [(get-values entity)])
+                          (sql/format))]
       (println query)
+      ;; TODO validate data before execution
       #_(jdbc/execute-one! database query)))
 
   (update! [_])
@@ -50,11 +54,10 @@
 
 (defmethod ig/init-key :fx/entity [_ config]
   (let [{:keys [table database]} config
-        parsed-table     (parse-table table)
-        create-statement {:insert-into (get-in parsed-table [:props :name])}]
+        parsed-table (parse-table table)]
+    ;; TODO add parsing validation, throw error on invalid table
     (map->Entity {:database database
-                  :create   {:statement create-statement
-                             :columns   (mapv :name (:fields parsed-table))}})))
+                  :table    parsed-table})))
 
 
 (comment
@@ -88,10 +91,10 @@
               :columns     [:id :name]})
 
  (let [create-statement {:insert-into (get-in user-table-parsed [:props :name])}
-       ^Entity user (map->Entity {:database "database"
-                                  :create   {:statement create-statement
-                                             :columns   (mapv :name (:fields user-table-parsed))}})]
-   (.create! user {:id "qwe" :name "test"}))
+       ^Entity user     (map->Entity {:database "database"
+                                      :create   {:statement create-statement
+                                                 :columns   (mapv :name (:fields user-table-parsed))}})]
+   (repo/create! user {:id "qwe" :name "test"}))
 
  ((apply juxt [:id :name]) {:id "qwe" :name "test"}))
 
