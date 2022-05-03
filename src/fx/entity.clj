@@ -11,7 +11,7 @@
 
 
 (def rel-types
-  #{:one-two-one? :one-two-many? :many-two-one? :many-two-many?})
+  #{:one-to-one? :one-to-many? :many-to-one? :many-to-many?})
 
 
 (def EntityTableSpec
@@ -54,9 +54,9 @@
 
 
 (defmethod ->field-type :table-ref
-  [{:keys [one-two-one? many-two-one?]} [_type-key type]]
+  [{:keys [one-to-one? many-to-one?]} [_type-key type]]
   (let [entity-ref (name->ref type)]
-    (if (or one-two-one? many-two-one?)
+    (if (or one-to-one? many-to-one?)
       {:type entity-ref}
       {:type :+ :children [{:type entity-ref}]})))
 
@@ -138,7 +138,7 @@
     (reduce (fn [acc {[type type-ref] :type :keys [name properties]}]
               (cond-> acc
                       (and (= type :table-ref)
-                           (or (:one-two-one? properties) (:many-two-one? properties)))
+                           (or (:one-to-one? properties) (:many-to-one? properties)))
                       (add-related-entity m name type-ref)
 
                       (not= type :table-ref)
@@ -151,7 +151,7 @@
   (->> fields
        (filter (fn [{[type] :type :keys [properties]}]
                  (not (and (= type :table-ref)
-                           (or (:one-two-many? properties) (:many-two-many? properties))))))
+                           (or (:one-to-many? properties) (:many-to-many? properties))))))
        (mapv :name)))
 
 
@@ -218,20 +218,20 @@
     [:id {:primary-key? true} uuid?]
     [:name [:string {:max 250}]]
     [:last-name {:optional? true} string?]
-    [:client {:many-two-one? true} :my/client]
-    [:role {:many-two-one? true} :my/role]])
+    [:client {:many-to-one? true} :my/client]
+    [:role {:many-to-one? true} :my/role]])
 
  (def client-tbl
    [:table {:name "client"}
     [:id {:primary-key? true} uuid?]
     [:name [:string {:max 250}]]
-    [:user {:one-two-many? true} :my/user]])
+    [:user {:one-to-many? true} :my/user]])
 
  (def role-tbl
    [:table {:name "role"}
     [:id {:primary-key? true} uuid?]
     [:name [:string {:max 250}]]
-    [:user {:one-two-many? true} :my/user]])
+    [:user {:one-to-many? true} :my/user]])
 
  (def system
    (ig/init {[:fx/entity :my/user]   {:table user-tbl}
