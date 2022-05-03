@@ -10,6 +10,10 @@
    [honey.sql :as sql]))
 
 
+(def rel-types
+  #{:one-two-one? :one-two-many? :many-two-one? :many-two-many?})
+
+
 (def EntityTableSpec
   [:schema
    {:registry
@@ -50,11 +54,11 @@
 
 
 (defmethod ->field-type :table-ref
-  [{:keys [has-many?]} [_type-key type]]
+  [{:keys [one-two-one? many-two-one?]} [_type-key type]]
   (let [entity-ref (name->ref type)]
-    (if has-many?
-      {:type :+ :children [{:type entity-ref}]}
-      {:type entity-ref})))
+    (if (or one-two-one? many-two-one?)
+      {:type entity-ref}
+      {:type :+ :children [{:type entity-ref}]})))
 
 
 (defmethod ->field-type :default
@@ -64,7 +68,6 @@
 
 (defn ->field-properties [properties]
   (-> properties
-      (select-keys [:optional?])
       (c.set/rename-keys {:optional? :optional})))
 
 
@@ -116,16 +119,49 @@
                         {:error (me/humanize (m/explain entity-name m {:registry entities-registry}))})))))
 
 
-(defrecord Entity [database table]
+(defn get-pk-name [[field props]]
+  (when (get-in props [:properties :primary-key?])
+    field))
+
+
+(defn add-related-entity [acc m name type-ref]
+  (let [ref-fields (get-in @entities-lookup [type-ref :keys])
+        value      (get m name)
+        val        (if (map? value)
+                     (get value (some get-pk-name ref-fields))
+                     value)]
+    (conj acc val)))
+
+
+(defn get-values-fn [fields]
+  (fn [m]
+    (reduce (fn [acc {[type type-ref] :type :keys [name properties]}]
+              (cond-> acc
+                      (and (= type :table-ref)
+                           (or (:one-two-one? properties) (:many-two-one? properties)))
+                      (add-related-entity m name type-ref)
+
+                      (not= type :table-ref)
+                      (conj (get m name))))
+            []
+            fields)))
+
+
+(defrecord SQLEntity [database table]
   repo/PRepository
   (create! [_ entity-map]
-    (let [{:keys [table-name columns validate get-values]} table]
+    (let [{:keys [table-name fields validate get-values]} table]
       (validate entity-map)
 
-      (let [query (-> {:insert-into table-name}
-                      (assoc :columns columns)
-                      (assoc :values [(get-values entity-map)])
-                      (sql/format))]
+      (let [columns (->> fields
+                         (filter (fn [{[type] :type :keys [properties]}]
+                                   (not (and (= type :table-ref)
+                                             (or (:one-two-many? properties) (:many-two-many? properties))))))
+                         (mapv :name))
+            query   (-> {:insert-into table-name}
+                        (assoc :columns columns)
+                        (assoc :values [(get-values entity-map)])
+                        (sql/format))]
         (println query)
         #_(jdbc/execute-one! database query))))
 
@@ -141,7 +177,8 @@
 
 
 (defmethod ig/init-key :fx/entity [entity config]
-  (let [{:keys [table database]} config
+  (let [{:keys [table database entity-type]
+         :or   {entity-type :sql}} config
         entity-name  (if (vector? entity) (second entity) entity)
         valid-table? (m/validate EntityTableSpec table)]
 
@@ -152,18 +189,19 @@
     (let [parsed-table (parse-table table)
           table-name   (get-in parsed-table [:properties :name])
           fields       (:fields parsed-table)
-          columns      (mapv :name fields)
-          get-values   (apply juxt columns)
+          get-values   (get-values-fn fields)
           validate     (get-validator-fn entity-name)
           entity-table {:table-name table-name
-                        :columns    columns
+                        :fields     fields
                         :validate   validate
                         :get-values get-values}]
 
       (register-entity! entity-name fields)
 
-      (map->Entity {:database database
-                    :table    entity-table}))))
+      (case entity-type
+        :sql
+        (map->SQLEntity {:database database
+                         :table    entity-table})))))
 
 
 
@@ -176,8 +214,8 @@
     [:id {:primary-key? true} uuid?]
     [:name [:string {:max 250}]]
     [:last-name {:optional? true} string?]
-    [:client {:has-one? true} :my/client]
-    [:role {:has-many? true} :my/role]])
+    [:client {:many-two-one? true} :my/client]
+    [:role {:many-two-one? true} :my/role]])
 
  (def client-tbl
    [:table {:name "client"}
@@ -200,6 +238,15 @@
  (repo/create! user {:id     (random-uuid)
                      :name   "test"
                      :client (random-uuid)
-                     :role   [(random-uuid)]})
+                     :role   (random-uuid)})
+
+ (parse-table user-tbl)
+
+ (m/validate
+  (:my/user (mr/schemas entities-registry))
+  {:id     (random-uuid)
+   :name   "test"
+   :client (random-uuid)
+   :role   (random-uuid)})
 
  nil)
