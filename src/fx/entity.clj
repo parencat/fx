@@ -147,21 +147,23 @@
             fields)))
 
 
+(defn get-entity-columns [fields]
+  (->> fields
+       (filter (fn [{[type] :type :keys [properties]}]
+                 (not (and (= type :table-ref)
+                           (or (:one-two-many? properties) (:many-two-many? properties))))))
+       (mapv :name)))
+
+
 (defrecord SQLEntity [database table]
   repo/PRepository
   (create! [_ entity-map]
-    (let [{:keys [table-name fields validate get-values]} table]
+    (let [{:keys [table-name columns validate get-values]} table]
       (validate entity-map)
-
-      (let [columns (->> fields
-                         (filter (fn [{[type] :type :keys [properties]}]
-                                   (not (and (= type :table-ref)
-                                             (or (:one-two-many? properties) (:many-two-many? properties))))))
-                         (mapv :name))
-            query   (-> {:insert-into table-name}
-                        (assoc :columns columns)
-                        (assoc :values [(get-values entity-map)])
-                        (sql/format))]
+      (let [query (-> {:insert-into table-name}
+                      (assoc :columns columns)
+                      (assoc :values [(get-values entity-map)])
+                      (sql/format))]
         (println query)
         #_(jdbc/execute-one! database query))))
 
@@ -189,10 +191,12 @@
     (let [parsed-table (parse-table table)
           table-name   (get-in parsed-table [:properties :name])
           fields       (:fields parsed-table)
+          columns      (get-entity-columns fields)
           get-values   (get-values-fn fields)
           validate     (get-validator-fn entity-name)
           entity-table {:table-name table-name
                         :fields     fields
+                        :columns    columns
                         :validate   validate
                         :get-values get-values}]
 
@@ -220,12 +224,14 @@
  (def client-tbl
    [:table {:name "client"}
     [:id {:primary-key? true} uuid?]
-    [:name [:string {:max 250}]]])
+    [:name [:string {:max 250}]]
+    [:user {:one-two-many? true} :my/user]])
 
  (def role-tbl
    [:table {:name "role"}
     [:id {:primary-key? true} uuid?]
-    [:name [:string {:max 250}]]])
+    [:name [:string {:max 250}]]
+    [:user {:one-two-many? true} :my/user]])
 
  (def system
    (ig/init {[:fx/entity :my/user]   {:table user-tbl}
