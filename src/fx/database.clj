@@ -1,9 +1,14 @@
 (ns fx.database
   (:require
    [integrant.core :as ig]
-   [next.jdbc :as jdbc]))
+   [next.jdbc :as jdbc])
+  (:import
+   [java.sql Connection]))
 
 
-(defmethod ig/init-key :fx/database [_ {:keys [db-uri db-type]}]
-  (jdbc/get-connection {:connection-uri db-uri
-                        :dbtype         db-type}))
+(defmethod ig/init-key :fx/database [_ {:keys [url]}]
+  (jdbc/get-connection {:jdbcUrl url}))
+
+
+(defmethod ig/halt-key! :fx/database [^Connection connection]
+  (.close connection))

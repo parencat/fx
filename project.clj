@@ -11,10 +11,13 @@
                  [integrant "0.8.0"]
                  [metosin/malli "0.8.4"]
                  [com.github.seancorfield/next.jdbc "1.2.772"]
-                 [com.github.seancorfield/honeysql "2.2.868"]]
+                 [com.github.seancorfield/honeysql "2.2.868"]
+                 [org.postgresql/postgresql "42.3.4"]]
 
   :profiles
-  {:dev {:dependencies [[vvvvalvalval/scope-capture "0.3.3-s1"]]}}
+  {:dev {:dependencies [[vvvvalvalval/scope-capture "0.3.3-s1"]
+                        [clj-test-containers "0.7.0"]
+                        [org.testcontainers/postgresql "1.17.1"]]}}
 
   :deploy-repositories
   [["clojars" {:sign-releases false

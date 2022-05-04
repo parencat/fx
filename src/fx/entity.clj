@@ -58,7 +58,8 @@
   (let [entity-ref (name->ref type)]
     (if (or one-to-one? many-to-one?)
       {:type entity-ref}
-      {:type :+ :children [{:type entity-ref}]})))
+      {:type     :+
+       :children [{:type entity-ref}]})))
 
 
 (defmethod ->field-type :default
@@ -66,9 +67,13 @@
   {:type type})
 
 
-(defn ->field-properties [properties]
-  (-> properties
-      (c.set/rename-keys {:optional? :optional})))
+(defn ->field-properties [{:keys [one-two-many? many-two-many?] :as properties}]
+  (cond-> properties
+          :always
+          (c.set/rename-keys {:optional? :optional})
+
+          (or one-two-many? many-two-many?)
+          (assoc :optional true)))
 
 
 (defn field->spec-key [idx {:keys [name properties type]}]
@@ -164,8 +169,7 @@
                       (assoc :columns columns)
                       (assoc :values [(get-values entity-map)])
                       (sql/format))]
-        (println query)
-        #_(jdbc/execute-one! database query))))
+        (jdbc/execute-one! database query))))
 
   (update! [_])
   (find! [_])
@@ -213,6 +217,8 @@
 
 (comment
 
+ (require '[fx.database])
+
  (def user-tbl
    [:table {:name "user"}
     [:id {:primary-key? true} uuid?]
@@ -234,17 +240,29 @@
     [:user {:one-to-many? true} :my/user]])
 
  (def system
-   (ig/init {[:fx/entity :my/user]   {:table user-tbl}
-             [:fx/entity :my/client] {:table client-tbl}
-             [:fx/entity :my/role]   {:table role-tbl}}))
+   (ig/init {:fx/database            {:url "jdbc:postgresql://localhost:64725/test?user=test&password=test"}
+             [:fx/entity :my/user]   {:table user-tbl :database (ig/ref :fx/database)}
+             [:fx/entity :my/client] {:table client-tbl :database (ig/ref :fx/database)}
+             [:fx/entity :my/role]   {:table role-tbl :database (ig/ref :fx/database)}}))
 
- (def user
-   (get system [:fx/entity :my/user]))
+ (def role (get system [:fx/entity :my/role]))
+ (def client (get system [:fx/entity :my/client]))
+ (def user (get system [:fx/entity :my/user]))
 
- (repo/create! user {:id     (random-uuid)
+ (def role-id (random-uuid))
+ (def client-id (random-uuid))
+ (def user-id (random-uuid))
+
+ (repo/create! role {:id   role-id
+                     :name "test-role"})
+
+ (repo/create! client {:id   client-id
+                       :name "test-client"})
+
+ (repo/create! user {:id     user-id
                      :name   "test"
-                     :client (random-uuid)
-                     :role   (random-uuid)})
+                     :client client-id
+                     :role   role-id})
 
  (parse-table user-tbl)
 
