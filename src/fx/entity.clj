@@ -67,12 +67,12 @@
   {:type type})
 
 
-(defn ->field-properties [{:keys [one-two-many? many-two-many?] :as properties}]
+(defn ->field-properties [{:keys [one-to-many? many-to-many?] :as properties}]
   (cond-> properties
           :always
           (c.set/rename-keys {:optional? :optional})
 
-          (or one-two-many? many-two-many?)
+          (or one-to-many? many-to-many?)
           (assoc :optional true)))
 
 
@@ -179,7 +179,7 @@
 
 (defmethod ig/prep-key :fx/entity [_ table]
   {:table    table
-   :database (ig/ref :fx/database)})
+   :database (ig/ref :fx.database/connection)})
 
 
 (defmethod ig/init-key :fx/entity [entity config]
@@ -216,55 +216,6 @@
 
 
 (comment
-
- (require '[fx.database])
-
- (def user-tbl
-   [:table {:name "user"}
-    [:id {:primary-key? true} uuid?]
-    [:name [:string {:max 250}]]
-    [:last-name {:optional? true} string?]
-    [:client {:many-to-one? true} :my/client]
-    [:role {:many-to-one? true} :my/role]])
-
- (def client-tbl
-   [:table {:name "client"}
-    [:id {:primary-key? true} uuid?]
-    [:name [:string {:max 250}]]
-    [:user {:one-to-many? true} :my/user]])
-
- (def role-tbl
-   [:table {:name "role"}
-    [:id {:primary-key? true} uuid?]
-    [:name [:string {:max 250}]]
-    [:user {:one-to-many? true} :my/user]])
-
- (def system
-   (ig/init {:fx/database            {:url "jdbc:postgresql://localhost:64725/test?user=test&password=test"}
-             [:fx/entity :my/user]   {:table user-tbl :database (ig/ref :fx/database)}
-             [:fx/entity :my/client] {:table client-tbl :database (ig/ref :fx/database)}
-             [:fx/entity :my/role]   {:table role-tbl :database (ig/ref :fx/database)}}))
-
- (def role (get system [:fx/entity :my/role]))
- (def client (get system [:fx/entity :my/client]))
- (def user (get system [:fx/entity :my/user]))
-
- (def role-id (random-uuid))
- (def client-id (random-uuid))
- (def user-id (random-uuid))
-
- (repo/create! role {:id   role-id
-                     :name "test-role"})
-
- (repo/create! client {:id   client-id
-                       :name "test-client"})
-
- (repo/create! user {:id     user-id
-                     :name   "test"
-                     :client client-id
-                     :role   role-id})
-
- (parse-table user-tbl)
 
  (m/validate
   (:my/user (mr/schemas entities-registry))

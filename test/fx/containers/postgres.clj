@@ -1,7 +1,8 @@
 (ns fx.containers.postgres
   (:require
    [clj-test-containers.core :as tc]
-   [integrant.core :as ig])
+   [integrant.core :as ig]
+   [duct.core :as duct])
   (:import
    [org.testcontainers.containers PostgreSQLContainer]))
 
@@ -17,12 +18,26 @@
   (tc/stop! container))
 
 
-(defmethod ig/init-key :containers/postgres [_ {:keys [port]}]
-  (pg-container {:port port}))
+(defmethod ig/init-key :fx.containers/postgres [_ {:keys [port container]}]
+  (if (some? container)
+    container
+    (pg-container {:port port})))
 
 
-(defmethod ig/halt-key! :containers/postgres [container]
+(defmethod ig/halt-key! :fx.containers/postgres [_ container]
   (stop container))
+
+
+;; test helper module
+(defmethod ig/init-key :fx.containers.postgres/connection [_ _]
+  (let [container (pg-container {})]
+    (fn [config]
+      (duct/merge-configs
+       config
+       {:fx.database/connection {:url      (.getJdbcUrl (:container container))
+                                 :user     (.getUsername (:container container))
+                                 :password (.getPassword (:container container))}
+        :fx.containers/postgres {:container container}}))))
 
 
 (comment
