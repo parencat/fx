@@ -84,7 +84,7 @@
       (is (some? (get config [:fx/entity :fx.entity-test/dumb-entity]))))
 
 
-    (testing "should create entities records in running system"
+    (testing "should create clojure records for entities in the running system"
       (let [system     (ig/init config)
             role       (get system [:fx/entity :fx.entity-test/role])
             client     (get system [:fx/entity :fx.entity-test/client])
@@ -100,13 +100,18 @@
         (testing "should create records in database"
           (setup-tables connection)
 
-          (repo/create! role {:id role-id :name "test-role"})
-          (repo/create! client {:id client-id :name "test-client"})
-          (repo/create! user {:id user-id :name "test-user" :client client-id :role role-id})
+          (let [_role-res   (repo/create! role {:id role-id :name "test-role"})
+                _client-res (repo/create! client {:id client-id :name "test-client"})
+                user-res    (repo/create! user {:id     user-id :name "test-user" :last-name "test-last"
+                                                :client client-id :role role-id})
 
-          (let [new-role   (query-role connection role-id)
-                new-client (query-client connection client-id)
-                new-user   (query-user connection user-id)]
+                new-role    (query-role connection role-id)
+                new-client  (query-client connection client-id)
+                new-user    (query-user connection user-id)]
+
+            (is (= (:id user-res) user-id))
+            (is (= (:last-name user-res) "test-last"))
+
             (is (= (:role/name new-role) "test-role"))
             (is (= (:client/name new-client) "test-client"))
             (is (= (:user/name new-user) "test-user"))))

@@ -7,6 +7,7 @@
    [malli.error :as me]
    [malli.registry :as mr]
    [next.jdbc :as jdbc]
+   [next.jdbc.result-set :as jdbc.rs]
    [honey.sql :as sql]))
 
 
@@ -169,7 +170,8 @@
                       (assoc :columns columns)
                       (assoc :values [(get-values entity-map)])
                       (sql/format))]
-        (jdbc/execute-one! database query))))
+        (jdbc/execute-one! database query {:return-keys true
+                                           :builder-fn  jdbc.rs/as-unqualified-kebab-maps}))))
 
   (update! [_])
   (find! [_])
