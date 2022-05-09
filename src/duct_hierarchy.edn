@@ -1,3 +1,2 @@
-{:fx.module/autowire [:duct/module]
- :fx.module/database [:duct/module]
- :fx/database        [:duct/daemon]}
+{:fx.module/autowire     [:duct/module]
+ :fx.database/connection [:duct/daemon]}

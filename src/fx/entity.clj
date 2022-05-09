@@ -7,6 +7,7 @@
    [malli.error :as me]
    [malli.registry :as mr]
    [next.jdbc :as jdbc]
+   [next.jdbc.result-set :as jdbc.rs]
    [honey.sql :as sql]))
 
 
@@ -58,7 +59,8 @@
   (let [entity-ref (name->ref type)]
     (if (or one-to-one? many-to-one?)
       {:type entity-ref}
-      {:type :+ :children [{:type entity-ref}]})))
+      {:type     :+
+       :children [{:type entity-ref}]})))
 
 
 (defmethod ->field-type :default
@@ -66,9 +68,13 @@
   {:type type})
 
 
-(defn ->field-properties [properties]
-  (-> properties
-      (c.set/rename-keys {:optional? :optional})))
+(defn ->field-properties [{:keys [one-to-many? many-to-many?] :as properties}]
+  (cond-> properties
+          :always
+          (c.set/rename-keys {:optional? :optional})
+
+          (or one-to-many? many-to-many?)
+          (assoc :optional true)))
 
 
 (defn field->spec-key [idx {:keys [name properties type]}]
@@ -164,8 +170,8 @@
                       (assoc :columns columns)
                       (assoc :values [(get-values entity-map)])
                       (sql/format))]
-        (println query)
-        #_(jdbc/execute-one! database query))))
+        (jdbc/execute-one! database query {:return-keys true
+                                           :builder-fn  jdbc.rs/as-unqualified-kebab-maps}))))
 
   (update! [_])
   (find! [_])
@@ -175,7 +181,7 @@
 
 (defmethod ig/prep-key :fx/entity [_ table]
   {:table    table
-   :database (ig/ref :fx/database)})
+   :database (ig/ref :fx.database/connection)})
 
 
 (defmethod ig/init-key :fx/entity [entity config]
@@ -212,41 +218,6 @@
 
 
 (comment
-
- (def user-tbl
-   [:table {:name "user"}
-    [:id {:primary-key? true} uuid?]
-    [:name [:string {:max 250}]]
-    [:last-name {:optional? true} string?]
-    [:client {:many-to-one? true} :my/client]
-    [:role {:many-to-one? true} :my/role]])
-
- (def client-tbl
-   [:table {:name "client"}
-    [:id {:primary-key? true} uuid?]
-    [:name [:string {:max 250}]]
-    [:user {:one-to-many? true} :my/user]])
-
- (def role-tbl
-   [:table {:name "role"}
-    [:id {:primary-key? true} uuid?]
-    [:name [:string {:max 250}]]
-    [:user {:one-to-many? true} :my/user]])
-
- (def system
-   (ig/init {[:fx/entity :my/user]   {:table user-tbl}
-             [:fx/entity :my/client] {:table client-tbl}
-             [:fx/entity :my/role]   {:table role-tbl}}))
-
- (def user
-   (get system [:fx/entity :my/user]))
-
- (repo/create! user {:id     (random-uuid)
-                     :name   "test"
-                     :client (random-uuid)
-                     :role   (random-uuid)})
-
- (parse-table user-tbl)
 
  (m/validate
   (:my/user (mr/schemas entities-registry))
