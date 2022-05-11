@@ -7,11 +7,15 @@
    [org.testcontainers.containers PostgreSQLContainer]))
 
 
-(defn pg-container [{:keys [port]
-                     :or   {port 5432}}]
-  (-> (tc/init {:container     (PostgreSQLContainer. "postgres:14.2")
-                :exposed-ports [port]})
-      (tc/start!)))
+(defn pg-container
+  ([]
+   (pg-container {}))
+
+  ([{:keys [port]
+     :or   {port 5432}}]
+   (-> (tc/init {:container     (PostgreSQLContainer. "postgres:14.2")
+                 :exposed-ports [port]})
+       (tc/start!))))
 
 
 (defn stop [container]

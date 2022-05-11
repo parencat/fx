@@ -112,7 +112,9 @@
         {:keys [name] [_ type] :type} pk-field
 
         schema      {:type :map :keys schema-keys}
-        schema-ref  (m/schema [:or type [:map [name type]]])]
+        schema-ref  {:type     :or
+                     :children [{:type type}
+                                {:type :map, :keys {name {:order 0, :value {:type type}}}}]}]
 
     (register-lookup! entity-name schema)
     (register-lookup! (name->ref entity-name) schema-ref)))
