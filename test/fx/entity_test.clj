@@ -43,29 +43,9 @@
 (def simple-config
   {:duct.profile/base                 {:duct.core/project-ns 'test}
    :fx.module/autowire                {:root 'fx.entity-test}
+   :fx.module/database                {}
    :fx.containers.postgres/connection {}})
 
-
-(def tables-query
-  "create table client (
-    id   uuid    not null primary key,
-    name varchar not null unique
-   );
-   create table role (
-    id   uuid    not null primary key,
-    name varchar not null unique
-   );
-   create table \"user\" (
-    id        uuid    not null primary key,
-    name      varchar not null,
-    last_name varchar,
-    client    uuid    not null references client on delete cascade,
-    role      uuid    not null references role on delete cascade
-   );")
-
-
-(defn setup-tables [^Connection connection]
-  (jdbc/execute! connection [tables-query]))
 
 (defn query-user [^Connection connection id]
   (jdbc/execute-one! connection ["select * from \"user\" where id = ?" id]))
@@ -98,8 +78,6 @@
         (is (satisfies? repo/PRepository user))
 
         (testing "should create records in database"
-          (setup-tables connection)
-
           (let [_role-res   (repo/create! role {:id role-id :name "test-role"})
                 _client-res (repo/create! client {:id client-id :name "test-client"})
                 user-res    (repo/create! user {:id     user-id :name "test-user" :last-name "test-last"

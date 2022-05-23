@@ -68,19 +68,23 @@
   {:type type})
 
 
-(defn ->field-properties [{:keys [one-to-many? many-to-many?] :as properties}]
+(defn ->field-properties [{:keys [one-to-many? many-to-many?] :as properties}
+                          [type-key _type]]
   (cond-> properties
           :always
           (c.set/rename-keys {:optional? :optional})
 
           (or one-to-many? many-to-many?)
-          (assoc :optional true)))
+          (assoc :optional true)
+
+          (= type-key :table-ref)
+          (assoc :foreign-key? true)))
 
 
 (defn field->spec-key [idx {:keys [name properties type]}]
   [name {:order      idx
          :value      (->field-type properties type)
-         :properties (->field-properties properties)}])
+         :properties (->field-properties properties type)}])
 
 
 (def entities-lookup
@@ -102,17 +106,22 @@
   (swap! entities-lookup assoc entity-name schema))
 
 
-(defn register-entity! [entity-name fields]
+(defn register-entity! [entity-name table-name fields]
   (let [schema-keys (->> fields
                          (map-indexed field->spec-key)
                          (into {}))
         pk-field    (->> fields
                          (filter #(get-in % [:properties :primary-key?]))
                          first)
+
         {:keys [name] [_ type] :type} pk-field
 
-        schema      {:type :map :keys schema-keys}
-        schema-ref  (m/schema [:or type [:map [name type]]])]
+        schema      {:type       :map
+                     :properties {:table-name table-name}
+                     :keys       schema-keys}
+        schema-ref  {:type     :or
+                     :children [{:type type}
+                                {:type :map, :keys {name {:order 0, :value {:type type}}}}]}]
 
     (register-lookup! entity-name schema)
     (register-lookup! (name->ref entity-name) schema-ref)))
@@ -179,12 +188,7 @@
   (delete! [_]))
 
 
-(defmethod ig/prep-key :fx/entity [_ table]
-  {:table    table
-   :database (ig/ref :fx.database/connection)})
-
-
-(defmethod ig/init-key :fx/entity [entity config]
+(defn create-entity [entity config]
   (let [{:keys [table database entity-type]
          :or   {entity-type :sql}} config
         entity-name  (if (vector? entity) (second entity) entity)
@@ -201,12 +205,13 @@
           get-values   (get-values-fn fields)
           validate     (get-validator-fn entity-name)
           entity-table {:table-name table-name
+                        :lookup     entity-name
                         :fields     fields
                         :columns    columns
                         :validate   validate
                         :get-values get-values}]
 
-      (register-entity! entity-name fields)
+      (register-entity! entity-name table-name fields)
 
       (case entity-type
         :sql
@@ -214,16 +219,10 @@
                          :table    entity-table})))))
 
 
+(defmethod ig/prep-key :fx/entity [_ table]
+  {:table    table
+   :database (ig/ref :fx.database/connection)})
 
 
-
-(comment
-
- (m/validate
-  (:my/user (mr/schemas entities-registry))
-  {:id     (random-uuid)
-   :name   "test"
-   :client (random-uuid)
-   :role   (random-uuid)})
-
- nil)
+(defmethod ig/init-key :fx/entity [entity config]
+  (create-entity entity config))
