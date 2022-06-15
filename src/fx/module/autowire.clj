@@ -3,7 +3,8 @@
    [integrant.core :as ig]
    [clojure.java.classpath :as cp]
    [clojure.string]
-   [clojure.tools.namespace.find :as tools.find]))
+   [clojure.tools.namespace.find :as tools.find]
+   [malli.core :as m]))
 
 
 (def ^:const AUTOWIRED-KEY :fx/autowire)
@@ -11,10 +12,32 @@
 (def ^:const WRAP-KEY :fx/wrap)
 
 
-(defn find-project-namespaces [root-ns]
-  (->> (cp/classpath)
-       tools.find/find-namespaces
-       (filter #(clojure.string/starts-with? % (str root-ns)))))
+(defn find-project-namespaces
+  "Will return all namespaces names as symbols from the classpath.
+   Limit the number of resources by providing a pattern argument.
+   By default, namespaces will be limited to user.dir folder.
+   Passing nil as argument will lead to returning all namespaces."
+  ([]
+   (let [full-project-path (System/getProperty "user.dir")
+         pattern           (re-find #"[^\/]+$" full-project-path)]
+     (find-project-namespaces pattern)))
+
+  ([pattern]
+   (->> (cp/classpath)
+        tools.find/find-namespaces
+        (filter #(clojure.string/starts-with? % (str pattern))))))
+
+(def namespace-pattern-s
+  [:maybe [:or :string :symbol]])
+
+(def project-namespaces
+  [:sequential :symbol])
+
+(m/=> find-project-namespaces
+  [:function
+   [:=> [:cat] project-namespaces]
+   [:=> [:cat namespace-pattern-s] project-namespaces]])
+
 
 
 (defn collect-autowired [ns autowired item-key item-val]
