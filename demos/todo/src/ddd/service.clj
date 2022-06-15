@@ -3,20 +3,20 @@
 
 
 (def ^{:fx/autowire :fx/entity} client
-  [:table {:name "client"}
+  [:spec {:table "client"}
    [:id {:primary-key? true} uuid?]
    [:name string?]])
 
 
 (def ^{:fx/autowire :fx/entity} role
-  [:table {:name "role"}
+  [:spec {:table "role"}
    [:id {:primary-key? true} uuid?]
    [:name string?]
    [:user {:has-many? true} :ddd.service/user]])
 
 
 (def ^{:fx/autowire :fx/entity} user
-  [:table {:name "user"}
+  [:spec {:table "user"}
    [:id {:primary-key? true} uuid?]
    [:name {:type "text"} string?]
    [:last-name {:optional? true} string?]

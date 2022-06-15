@@ -5,14 +5,16 @@
   :min-lein-version "2.0.0"
 
   :dependencies [[org.clojure/clojure "1.11.1"]
-                 [org.clojure/tools.namespace "1.2.0"]
+                 [org.clojure/tools.namespace "1.3.0"]
                  [org.clojure/java.classpath "1.0.0"]
+                 [org.clojure/core.match "1.0.0"]
                  [duct/core "0.8.0"]
                  [integrant "0.8.0"]
+                 [weavejester/dependency "0.2.1"]
                  [metosin/malli "0.8.4"]
                  [medley "1.4.0"]
-                 [com.github.seancorfield/next.jdbc "1.2.772"]
-                 [com.github.seancorfield/honeysql "2.2.868"]
+                 [com.github.seancorfield/next.jdbc "1.2.780"]
+                 [com.github.seancorfield/honeysql "2.2.891"]
                  [org.postgresql/postgresql "42.3.4"]]
 
   :profiles

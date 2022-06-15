@@ -3,157 +3,77 @@
    [integrant.core :as ig]
    [clojure.string :as str]
    [clojure.data :as data]
+   [clojure.core.match :refer [match]]
    [next.jdbc :as jdbc]
    [next.jdbc.result-set :as rs]
-   [medley.core :as mdl]
-   [fx.entity :as entity]
-   [honey.sql :as sql])
-  (:import [java.sql DatabaseMetaData]
-           [clojure.lang PersistentHashSet]))
+   [fx.entity :as fx.entity]
+   [honey.sql :as sql]
+   [weavejester.dependency :as dep])
+  (:import
+   [java.sql DatabaseMetaData]))
 
 
-(defmulti ->type-ddl
-  (fn [_ {:keys [type]}] type))
+;; =============================================================================
+;; Entity DDL
+;; =============================================================================
 
-(defmethod ->type-ddl uuid? [_ _]
-  :uuid)
-
-(defmethod ->type-ddl :uuid [_ _]
-  :uuid)
-
-(defmethod ->type-ddl string? [_ _]
-  :varchar)
-
-(defmethod ->type-ddl :string [_ {:keys [properties]}]
-  (if-some [max (:max properties)]
-    [:varchar max]
-    :varchar))
-
-(defmethod ->type-ddl :default [all-specs {:keys [type]}]
-  (if-let [ref-spec (and (qualified-keyword? type)
-                         (get all-specs type))]
-    (let [ref-type (get-in ref-spec [:children 0 :type])]
-      (->type-ddl all-specs {:type ref-type}))
-
-    (throw (ex-info (str "Unknown type for column " type) {:type type}))))
+(declare schema->column-type)
 
 
-(defmulti ->type-name
-  (fn [_ {:keys [type]}] type))
-
-(defmethod ->type-name uuid? [_ _]
-  "uuid")
-
-(defmethod ->type-name :uuid [_ _]
-  "uuid")
-
-(defmethod ->type-name string? [_ _]
-  "varchar")
-
-(defmethod ->type-name :string [_ _]
-  "varchar")
-
-(defmethod ->type-name :default [all-specs {:keys [type]}]
-  (if-let [ref-spec (and (qualified-keyword? type)
-                         (get all-specs type))]
-    (let [ref-type (get-in ref-spec [:children 0 :type])]
-      (->type-name all-specs {:type ref-type}))
-
-    (throw (ex-info (str "Unknown type for column " type) {:type type}))))
+(defn get-ref-type [entity]
+  (-> entity
+      fx.entity/primary-key-schema
+      val
+      fx.entity/entry-schema
+      schema->column-type))
 
 
-(defn ->ref-table [{:keys [type]}]
-  (keyword (str/replace (name type) "-ref" "")))
+(defn schema->column-type [{:keys [type props]}]
+  (match [type props]
+    [:uuid _] :uuid
+    ['uuid? _] :uuid
+
+    [:string {:max max}] [:varchar max]
+    [:string _] :varchar
+    ['string? _] :varchar
+
+    [:entity-ref {:entity entity}] (get-ref-type entity)
+
+    :else (throw (ex-info (str "Unknown type for column " type) {:type type}))))
 
 
-(defn column-ddl [all-specs [column-name column-spec]]
-  (let [{:keys [value properties]} column-spec
-        column-type (->type-ddl all-specs value)]
-    (cond-> [column-name column-type]
-
-            (not (:optional properties))
-            (conj [:not nil])
-
-            (or (:one-to-one? properties) (:many-to-one? properties))
-            (conj [:references (->ref-table value)])
-
-            (:primary-key? properties)
-            (conj [:primary-key]))))
+(defn schema->column-modifiers [entry-schema]
+  (let [props (fx.entity/properties entry-schema)]
+    (cond-> []
+            (not (:optional props)) (conj [:not nil])
+            (:primary-key? props) (conj [:primary-key])
+            (:foreign-key? props) (conj [:references [:raw (fx.entity/entry-schema-table entry-schema)]])
+            (:cascade? props) (conj [:raw "on delete cascade"]))))
 
 
-(defn non-refs [{:keys [properties]}]
-  (let [{:keys [one-to-many? many-to-many?]} properties]
-    (not (or one-to-many? many-to-many?))))
+(defn entity->columns-ddl [entity]
+  (->> (fx.entity/entity-entries (:entity entity))
+       (mapv (fn [[key schema]]
+               (-> [key (-> schema fx.entity/entry-schema schema->column-type)]
+                   (concat (schema->column-modifiers schema))
+                   vec)))))
 
 
-(defn create-table-ddl [all-specs table-name table-spec]
-  (let [columns (->> (:keys table-spec)
-                     (mdl/filter-vals non-refs)
-                     (mapv (partial column-ddl all-specs)))]
-    {:create-table table-name
-     :with-columns columns}))
+;; =============================================================================
+;; DB DDL
+;; =============================================================================
+
+(defn table-exist? [database table]
+  (let [^DatabaseMetaData metadata (.getMetaData database)
+        tables                     (-> metadata
+                                       (.getTables nil nil table nil))]
+    (.next tables)))
 
 
-(defn create-column-ddl [all-specs table-name column-spec]
-  (let [columns ()]
-    {:alter-table
-     [table-name
-      {:add-column columns}
-      {:drop-column columns}
-      {:modify-column columns}]}))
-
-
-(defn spec-by-table-name [all-specs table-name]
-  (val (mdl/find-first
-        (fn [[_ {:keys [properties]}]]
-          (= table-name (:table-name properties)))
-        all-specs)))
-
-
-(defn get-table-refs [table-name]
-  (let [all-specs  @entity/entities-lookup
-        table-spec (spec-by-table-name all-specs table-name)]
-    (->> table-spec
-         :keys
-         vals
-         (filter (fn [{:keys [value]}]
-                   (qualified-keyword? (:type value))))
-         (map (comp ->ref-table :value))
-         set)))
-
-
-(defn has-refs? [dependant dependy]
-  (let [table-refs (get-table-refs dependant)]
-    (contains? table-refs (keyword dependy))))
-
-
-(defn by-dependencies [t1 t2]
-  (if (has-refs? t1 t2)
-    1
-    -1))
-
-
-(defn get-changes-ddl [[db-changes entities-changes common]]
-  ;; TODO should we delete tables if user deleted entity?
-  (when-not (and (nil? db-changes)
-                 (nil? entities-changes))
-    (let [all-specs     @entity/entities-lookup
-          tables-to-add (filter (fn [table-name]
-                                  (and (not (contains? db-changes table-name))
-                                       (not (contains? common table-name))))
-                                (keys entities-changes))]
-      (->> tables-to-add
-           (sort by-dependencies)
-           (map (fn [table-name]
-                  (let [table-spec (spec-by-table-name all-specs table-name)]
-                    (-> (create-table-ddl all-specs table-name table-spec)
-                        (sql/format)))))))))
-
-
-(defn get-table-columns [database table]
+(defn extract-db-columns [database table]
   (let [^DatabaseMetaData metadata (.getMetaData database)
         columns                    (-> metadata
-                                       (.getColumns nil "public" table nil)
+                                       (.getColumns nil "public" table nil) ;; TODO expose schema as option to clients
                                        (rs/datafiable-result-set database {:builder-fn rs/as-unqualified-kebab-maps}))
         primary-keys               (-> metadata
                                        (.getPrimaryKeys nil nil table)
@@ -171,67 +91,141 @@
                                         (into {}))]
     (reduce (fn [acc {:keys [column-name] :as column}]
               (let [column' (cond-> column
-                                    (contains? pk-set column-name)
-                                    (assoc :primary-key true)
-
-                                    (contains? fk-map column-name)
-                                    (merge (get fk-map column-name)))]
+                                    (contains? pk-set column-name) (assoc :primary-key true)
+                                    (contains? fk-map column-name) (merge (get fk-map column-name)))]
                 (conj acc column')))
             []
             columns)))
 
 
-(defn extract-db-columns [database entities]
-  (let [tables (map #(get-in % [:table :table-name]) entities)]
-    (mapcat (partial get-table-columns database) tables)))
+(defn db-columns->columns-ddl [columns]
+  (reduce (fn [acc {:keys [column-name type-name nullable primary-key foreign-key references]}]
+            (let [column-key (-> column-name
+                                 (str/replace "_" "-") ;; TODO expose as option to clients
+                                 keyword)
+                  type-key   (keyword type-name)
+                  modifiers  (cond-> []
+                                     (= nullable 0) (conj [:not nil])
+                                     primary-key (conj [:primary-key])
+                                     foreign-key (conj [:references [:raw references]]))
+                  column     (concat [column-key type-key] modifiers)]
+              (conj acc column)))
+          []
+          columns))
 
 
-(defn db->simple-schema [db-columns]
-  (reduce (fn [acc {:keys [table-name column-name type-name nullable primary-key foreign-key references]}]
-            (let [column-name' (str/replace column-name "_" "-")
-                  table-props  (cond-> {:type type-name :nullable (= nullable 1)}
-                                       primary-key
-                                       (assoc :primary-key primary-key)
-                                       foreign-key
-                                       (assoc :foreign-key foreign-key
-                                              :references references))]
-              (assoc-in acc [table-name column-name'] table-props)))
-          {}
-          db-columns))
+;; =============================================================================
+;; Migration functions
+;; =============================================================================
+
+(defn create-table-ddl [table columns]
+  {:create-table table
+   :with-columns columns})
 
 
-(defn entities->simple-schema [entities]
-  (let [all-specs @entity/entities-lookup]
-    (reduce (fn [acc entity]
-              (let [table-name   (get-in entity [:table :table-name])
-                    table-lookup (get-in entity [:table :lookup])
-                    table-fields (get-in all-specs [table-lookup :keys])
-                    columns      (->> table-fields
-                                      (mdl/filter-vals non-refs)
-                                      (mdl/map-kv (fn [column-name {:keys [value properties]}]
-                                                    [(name column-name)
-                                                     (cond-> {:type     (->type-name all-specs value)
-                                                              :nullable (true? (:optional properties))}
-                                                             (:primary-key? properties)
-                                                             (assoc :primary-key true)
-                                                             (:foreign-key? properties)
-                                                             (assoc :foreign-key true
-                                                                    :references (->ref-table value)))])))]
-                (assoc acc table-name columns)))
-            {}
-            entities)))
+(defn alter-table-ddl [table {:keys [modify delete add]}]
+  (let [changes (concat (map #(hash-map :drop-column %) delete)
+                        (map #(hash-map :add-column %) add)
+                        (map #(hash-map :modify-column %) modify))]
+    {:alter-table
+     (into [table] changes)}))
 
 
-(defn apply-migrations [{:keys [database ^PersistentHashSet entities]}]
-  (let [db-columns             (extract-db-columns database entities)
-        db-simple-schema       (db->simple-schema db-columns)
-        entities-simple-schema (entities->simple-schema entities)
-        changes                (data/diff db-simple-schema entities-simple-schema)
-        changes-ddl            (get-changes-ddl changes)]
-    (doseq [change changes-ddl]
-      (println "runing migration: " change)
-      (jdbc/execute! database change))))
+(defn ->named-maps [ddl]
+  (into {} (map #(vector (first %) %)) ddl))
 
+
+(defn merge-columns [col1 col2]
+  (let [max-count (max (count col1) (count col2))]
+    (loop [i      0
+           result []]
+      (if (= i max-count)
+        result
+        (recur
+         (inc i)
+         (conj result (or (get col1 i)
+                          (get col2 i))))))))
+
+
+(defn prep-changes [db-ddl entity-ddl]
+  (let [db-ddl-cols     (->named-maps db-ddl)
+        entity-ddl-cols (->named-maps entity-ddl)
+        [db-changes entity-changes common] (data/diff db-ddl-cols entity-ddl-cols)
+        all-keys        (set (concat (keys db-changes) (keys entity-changes)))]
+    (when (not-empty all-keys)
+      (reduce (fn [acc key]
+                (cond
+                  (and (or (contains? entity-changes key)
+                           (contains? db-changes key))
+                       (contains? common key))
+                  (let [entity (get entity-changes key)
+                        common (get common key)
+                        column (if (some? entity)
+                                 (merge-columns entity common)
+                                 common)]
+                    (update acc :modify conj column))
+
+                  (and (contains? db-changes key)
+                       (not (contains? common key)))
+                  (update acc :delete conj key)
+
+                  (and (contains? entity-changes key)
+                       (not (contains? common key)))
+                  (->> (get entity-changes key)
+                       rest
+                       (remove nil?)
+                       (into [key])
+                       (update acc :add conj))))
+              {} all-keys))))
+
+
+(defn entity->migration [database migrations entity]
+  (let [table      (:table entity)
+        entity-ddl (entity->columns-ddl entity)]
+    (if (not (table-exist? database table))
+      (->> entity-ddl
+           (create-table-ddl table)
+           (sql/format)
+           (conj migrations))
+
+      (let [db-columns (extract-db-columns database table)
+            db-ddl     (db-columns->columns-ddl db-columns)
+            changes    (prep-changes db-ddl entity-ddl)]
+        (some->> changes
+                 (alter-table-ddl table)
+                 (sql/format)
+                 (conj migrations))))))
+
+
+(defn sort-by-dependencies [entities]
+  (let [graph (atom (dep/graph))
+        emap  (into {} (map (fn [e] [(:entity e) e])) entities)]
+    (doseq [e1 entities e2 entities]
+      (if (fx.entity/depends-on? (:entity e1) (:entity e2))
+        (reset! graph (dep/depend @graph (:entity e1) (:entity e2)))
+        (reset! graph (dep/depend @graph (:entity e1) nil))))
+
+    (->> @graph
+         (dep/topo-sort)
+         (remove nil?)
+         (map (fn [e] (get emap e))))))
+
+
+(defn prep-migrations [database entities]
+  (let [sorted-entities (sort-by-dependencies entities)]
+    (-> (partial entity->migration database)
+        (reduce [] sorted-entities))))
+
+
+(defn apply-migrations [{:keys [database entities]}]
+  (let [migrations (prep-migrations database entities)]
+    (doseq [migration migrations]
+      (jdbc/execute! database migration))))
+
+
+;; =============================================================================
+;; Duct integration
+;; =============================================================================
 
 (defmethod ig/prep-key :fx/migrate [_ config]
   (merge config
@@ -241,86 +235,3 @@
 
 (defmethod ig/init-key :fx/migrate [_ config]
   (apply-migrations config))
-
-
-
-
-
-
-
-(comment
-
- (def cl-spec
-   {:type :map,
-    :keys {:id   {:order      0,
-                  :value      {:type uuid?},
-                  :properties {:primary-key? true}},
-           :name {:order      1,
-                  :value      {:type :string, :properties {:max 250}},
-                  :properties nil},
-           :user {:order      2,
-                  :value      {:type :+, :children [{:type :fx.entity-test/user-ref}]},
-                  :properties {:one-to-many? true, :optional true}}}})
-
- (def user-spec
-   {:type :map,
-    :keys {:id        {:order      0,
-                       :value      {:type uuid?},
-                       :properties {:primary-key? true}},
-           :name      {:order      1,
-                       :value      {:type :string, :properties {:max 250}},
-                       :properties nil},
-           :last-name {:order      2,
-                       :value      {:type string?},
-                       :properties {:optional true}},
-           :client    {:order      3,
-                       :value      {:type :fx.entity-test/client-ref},
-                       :properties {:many-to-one? true}},
-           :role      {:order      4,
-                       :value      {:type :fx.entity-test/role-ref},
-                       :properties {:many-to-one? true}}}})
-
-
- (require '[fx.entity :refer [entities-lookup]])
- (require '[malli.registry :as mr])
-
- (val (mdl/find-first
-       (fn [[_ {:keys [properties]}]]
-         (= "client" (:table-name properties)))
-       @entities-lookup))
-
- (create-table-ddl @entities-lookup "client" cl-spec)
- (create-table-ddl @entities-lookup "user" user-spec)
-
- (-> (mr/schema @entities-lookup :fx.entity-test/client-ref)
-     (get-in [2 1 1]))
-
- (def ->type-ddl nil)
-
- (malli.core/ast [:or uuid? [:map [:id uuid?]]])
-
- (get-in [:or uuid? [:map [:id uuid?]]] [2 1 1])
- (get-in [:or uuid? [:map [:id uuid?]]] [2 1 1])
-
- [[:id :uuid [:not nil] [:primary-key]]
-  [:name :varchar [:not nil]]
-  [:last-name :varchar]]
-
-
- (get-changes-ddl
-  '(nil
-    {"client" {"id" {:type "uuid", :nullable false, :primary-key true}, "name" {:type "varchar", :nullable false}}}
-    {"user" {"id"        {:type "uuid", :nullable false, :primary-key true},
-             "name"      {:type "varchar", :nullable false},
-             "last-name" {:type "varchar", :nullable true},
-             "client"    {:type "uuid", :nullable false, :foreign-key true, :references "client"},
-             "role"      {:type "uuid", :nullable false, :foreign-key true, :references "role"}},
-     "role" {"id"        {:type "uuid", :nullable false, :primary-key true},
-             "name"      {:type "varchar", :nullable false},
-             "test-name" {:type "varchar", :nullable true}}}))
-
-
- (get-table-refs "user")
- (sort by-dependencies ["role" "user" "client"])
-
- nil)

@@ -13,12 +13,12 @@
 
 
 (def ^{:fx/autowire :fx/entity} dumb-entity
-  [:table {:name "dumb-test"}
+  [:spec {:table "dumb-test"}
    [:id {:primary-key? true} [:string {:max 250}]]])
 
 
 (def ^{:fx/autowire :fx/entity} user
-  [:table {:name "user"}
+  [:spec {:table "user"}
    [:id {:primary-key? true} uuid?]
    [:name [:string {:max 250}]]
    [:last-name {:optional? true} string?]
@@ -27,14 +27,14 @@
 
 
 (def ^{:fx/autowire :fx/entity} client
-  [:table {:name "client"}
+  [:spec {:table "client"}
    [:id {:primary-key? true} uuid?]
    [:name [:string {:max 250}]]
    [:user {:one-to-many? true} :fx.entity-test/user]])
 
 
 (def ^{:fx/autowire :fx/entity} role
-  [:table {:name "role"}
+  [:spec {:table "role"}
    [:id {:primary-key? true} uuid?]
    [:name [:string {:max 250}]]
    [:user {:one-to-many? true} :fx.entity-test/user]])
@@ -62,7 +62,6 @@
 
     (testing "should create an entity key in the prepared config"
       (is (some? (get config [:fx/entity :fx.entity-test/dumb-entity]))))
-
 
     (testing "should create clojure records for entities in the running system"
       (let [system     (ig/init config)
