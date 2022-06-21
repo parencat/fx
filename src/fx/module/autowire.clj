@@ -162,10 +162,11 @@
    {} components))
 
 (m/=> prep-components-config
-  [:=> [:cat [:map-of :qualified-keyword :any]]
-   [:map-of
-    [:or :qualified-keyword [:vector {:min 2 :max 2} :qualified-keyword]]
-    [:or [:map-of :keyword ig-ref] :any]]])
+  [:function {:registry {::composite-integrant-key [:vector {:min 2 :max 2} :qualified-keyword]}}
+   [:=> [:cat [:map-of :qualified-keyword :any]]
+    [:map-of
+     [:or :qualified-keyword ::composite-integrant-key]
+     [:or [:map-of :keyword ig-ref] :any]]]])
 
 
 ;; =============================================================================
