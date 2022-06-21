@@ -3,12 +3,14 @@
    [clojure.test :refer :all]
    [duct.core :as duct]
    [integrant.core :as ig]
-   [fx.containers.postgres :as pg])
+   [fx.containers.postgres :as pg]
+   [malli.instrument :as mi])
   (:import
    [java.sql Connection]))
 
 
 (duct/load-hierarchy)
+(mi/instrument!)
 
 
 (def invalid-config

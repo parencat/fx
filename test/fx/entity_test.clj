@@ -4,12 +4,14 @@
    [duct.core :as duct]
    [integrant.core :as ig]
    [fx.repository :as repo]
-   [next.jdbc :as jdbc])
+   [next.jdbc :as jdbc]
+   [malli.instrument :as mi])
   (:import
    [java.sql Connection]))
 
 
 (duct/load-hierarchy)
+(mi/instrument!)
 
 
 (def ^{:fx/autowire :fx/entity} dumb-entity

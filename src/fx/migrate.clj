@@ -220,6 +220,7 @@
 (defn apply-migrations [{:keys [database entities]}]
   (let [migrations (prep-migrations database entities)]
     (doseq [migration migrations]
+      (println "Running migration" migration)
       (jdbc/execute! database migration))))
 
 

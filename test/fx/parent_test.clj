@@ -2,11 +2,12 @@
   (:require
    [clojure.test :refer :all]
    [duct.core :as duct]
-   [integrant.core :as ig]))
+   [integrant.core :as ig]
+   [malli.instrument :as mi]))
 
 
 (duct/load-hierarchy)
-
+(mi/instrument!)
 
 (def simple-config
   {:duct.profile/base  {:duct.core/project-ns 'test}
