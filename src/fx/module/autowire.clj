@@ -161,12 +161,14 @@
          (prep-component config comp-key comp-value))))
    {} components))
 
+(def composite-integrant-key
+  [:vector {:min 2 :max 2} :qualified-keyword])
+
 (m/=> prep-components-config
-  [:function {:registry {::composite-integrant-key [:vector {:min 2 :max 2} :qualified-keyword]}}
-   [:=> [:cat [:map-of :qualified-keyword :any]]
-    [:map-of
-     [:or :qualified-keyword ::composite-integrant-key]
-     [:or [:map-of :keyword ig-ref] :any]]]])
+  [:=> [:cat [:map-of :qualified-keyword :any]]
+   [:map-of
+    [:or :qualified-keyword composite-integrant-key]
+    [:or [:map-of :keyword ig-ref] :any]]])
 
 
 ;; =============================================================================
