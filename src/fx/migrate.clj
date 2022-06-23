@@ -13,6 +13,9 @@
    [java.sql DatabaseMetaData]))
 
 
+(sql/register-clause! :alter-column :modify-column :modify-column)
+
+
 ;; =============================================================================
 ;; Entity DDL
 ;; =============================================================================
@@ -126,7 +129,7 @@
 (defn alter-table-ddl [table {:keys [modify delete add]}]
   (let [changes (concat (map #(hash-map :drop-column %) delete)
                         (map #(hash-map :add-column %) add)
-                        (map #(hash-map :modify-column %) modify))]
+                        (map #(hash-map :alter-column %) modify))]
     {:alter-table
      (into [table] changes)}))
 
@@ -135,16 +138,26 @@
   (into {} (map #(vector (first %) %)) ddl))
 
 
+; when type has been changed then inject "TYPE" raw from
+; ALTER COLUMN id VARCHAR NOT NULL PRIMARY KEY      to
+; ALTER COLUMN id TYPE VARCHAR NOT NULL PRIMARY KEY
+(defn inject-type [[name & rst]]
+  (concat [name] [[:raw "TYPE"]] rst))
+
+
 (defn merge-columns [col1 col2]
-  (let [max-count (max (count col1) (count col2))]
-    (loop [i      0
-           result []]
-      (if (= i max-count)
-        result
-        (recur
-         (inc i)
-         (conj result (or (get col1 i)
-                          (get col2 i))))))))
+  (let [max-count (max (count col1) (count col2))
+        result (loop [i      0
+                      result []]
+                 (if (= i max-count)
+                   result
+                   (recur
+                     (inc i)
+                     (conj result (or (get col1 i)
+                                    (get col2 i))))))]
+    (if (second col2)
+      (inject-type result)
+      result)))
 
 
 (defn prep-changes [db-ddl entity-ddl]
