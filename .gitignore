@@ -16,4 +16,7 @@ profiles.clj
 
 .idea
 *.iml
-.clj-kondo
+
+.clj-kondo/*
+!.clj-kondo/config.edn
+demos/todo/.clj-kondo

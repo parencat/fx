@@ -2,18 +2,17 @@
   (:require
    [integrant.core :as ig]
    [clojure.string :as str]
-   [clojure.data :as data]
+   [clojure.set]
    [clojure.core.match :refer [match]]
    [next.jdbc :as jdbc]
    [next.jdbc.result-set :as rs]
    [fx.entity :as fx.entity]
    [honey.sql :as sql]
-   [weavejester.dependency :as dep])
+   [weavejester.dependency :as dep]
+   [medley.core :as mdl]
+   [differ.core :as differ])
   (:import
    [java.sql DatabaseMetaData]))
-
-
-(sql/register-clause! :alter-column :modify-column :modify-column)
 
 
 ;; =============================================================================
@@ -62,6 +61,24 @@
                    vec)))))
 
 
+(defn schema->constraints-map [entry-schema]
+  (let [props (fx.entity/properties entry-schema)]
+    (cond-> {}
+            (some? (:optional props)) (assoc :optional (:optional props))
+            (:primary-key? props) (assoc :primary-key? true)
+            (:foreign-key? props) (assoc :foreign-key? (fx.entity/entry-schema-table entry-schema))
+            (:cascade? props) (assoc :cascade? true))))
+
+
+(defn get-entity-columns [entity]
+  (->> (fx.entity/entity-entries (:entity entity))
+       (reduce (fn [acc [key schema]]
+                 (let [column (-> {:type (-> schema fx.entity/entry-schema schema->column-type)}
+                                  (merge (schema->constraints-map schema)))]
+                   (assoc acc key column)))
+               {})))
+
+
 ;; =============================================================================
 ;; DB DDL
 ;; =============================================================================
@@ -73,137 +90,142 @@
     (.next tables)))
 
 
+(def index-by-name
+  (partial mdl/index-by :column-name))
+
+
 (defn extract-db-columns [database table]
   (let [^DatabaseMetaData metadata (.getMetaData database)
         columns                    (-> metadata
                                        (.getColumns nil "public" table nil) ;; TODO expose schema as option to clients
-                                       (rs/datafiable-result-set database {:builder-fn rs/as-unqualified-kebab-maps}))
+                                       (rs/datafiable-result-set database {:builder-fn rs/as-unqualified-kebab-maps})
+                                       index-by-name)
         primary-keys               (-> metadata
                                        (.getPrimaryKeys nil nil table)
-                                       (rs/datafiable-result-set database {:builder-fn rs/as-unqualified-kebab-maps}))
+                                       (rs/datafiable-result-set database {:builder-fn rs/as-unqualified-kebab-maps})
+                                       index-by-name)
         foreign-keys               (-> metadata
                                        (.getImportedKeys nil nil table)
-                                       (rs/datafiable-result-set database {:builder-fn rs/as-unqualified-kebab-maps}))
-        pk-set                     (->> primary-keys
-                                        (map :column-name)
-                                        set)
-        fk-map                     (->> foreign-keys
-                                        (map (fn [{:keys [fkcolumn-name pktable-name]}]
-                                               [fkcolumn-name {:foreign-key true
-                                                               :references  pktable-name}]))
-                                        (into {}))]
-    (reduce (fn [acc {:keys [column-name] :as column}]
-              (let [column' (cond-> column
-                                    (contains? pk-set column-name) (assoc :primary-key true)
-                                    (contains? fk-map column-name) (merge (get fk-map column-name)))]
-                (conj acc column')))
-            []
-            columns)))
+                                       (rs/datafiable-result-set database {:builder-fn rs/as-unqualified-kebab-maps})
+                                       index-by-name)]
+    (mdl/deep-merge columns primary-keys foreign-keys)))
 
 
-(defn db-columns->columns-ddl [columns]
-  (reduce (fn [acc {:keys [column-name type-name nullable primary-key foreign-key references]}]
-            (let [column-key (-> column-name
-                                 (str/replace "_" "-") ;; TODO expose as option to clients
-                                 keyword)
-                  type-key   (keyword type-name)
-                  modifiers  (cond-> []
-                                     (= nullable 0) (conj [:not nil])
-                                     primary-key (conj [:primary-key])
-                                     foreign-key (conj [:references [:raw references]]))
-                  column     (concat [column-key type-key] modifiers)]
-              (conj acc column)))
-          []
-          columns))
+(defn column->constraints-map [{:keys [nullable pk-name fkcolumn-name pktable-name]}]
+  (cond-> {}
+          (= nullable 1) (assoc :optional true)
+          (some? pk-name) (assoc :primary-key? true)
+          (some? fkcolumn-name) (assoc :foreign-key? pktable-name)))
+;;(:cascade? props) (assoc :cascade? true)))
+
+
+(def default-column-size
+  2147483647)
+
+
+(defn get-db-columns [database table]
+  (let [columns (extract-db-columns database table)]
+    (mdl/map-kv
+     (fn [column-name {:keys [type-name column-size] :as col}]
+       (let [key      (-> column-name
+                          (str/replace "_" "-") ;; TODO expose as option to clients
+                          keyword)
+             type-key (keyword type-name)
+             type     (if (and (= type-key :varchar) (not= column-size default-column-size))
+                        [type-key column-size]
+                        type-key)
+             column   (-> {:type type}
+                          (merge (column->constraints-map col)))]
+         [key column]))
+     columns)))
 
 
 ;; =============================================================================
 ;; Migration functions
 ;; =============================================================================
 
+;; Postgres doesn't support :modify-column clause
+(sql/register-clause! :alter-column :modify-column :modify-column)
+(sql/register-clause! :add-constraint :modify-column :modify-column)
+(sql/register-clause! :drop-constraint :modify-column :modify-column)
+
+
 (defn create-table-ddl [table columns]
   {:create-table table
    :with-columns columns})
 
 
-(defn alter-table-ddl [table {:keys [modify delete add]}]
-  (let [changes (concat (map #(hash-map :drop-column %) delete)
-                        (map #(hash-map :add-column %) add)
-                        (map #(hash-map :alter-column %) modify))]
+(defn alter-table-ddl [table changes]
+  (when-not (empty? changes)
     {:alter-table
      (into [table] changes)}))
 
 
-(defn ->named-maps [ddl]
-  (into {} (map #(vector (first %) %)) ddl))
+(defn column->modifiers [column]
+  (cond-> []
+          (not (:optional column)) (conj [:not nil])
+          (:primary-key? column) (conj [:primary-key])
+          (some? (:foreign-key? column)) (conj [:references [:raw (:foreign-key? column)]])
+          (:cascade? column) (conj [:raw "on delete cascade"])))
 
 
-; when type has been changed then inject "TYPE" raw from
-; ALTER COLUMN id VARCHAR NOT NULL PRIMARY KEY      to
-; ALTER COLUMN id TYPE VARCHAR NOT NULL PRIMARY KEY
-(defn inject-type [[name & rst]]
-  (concat [name] [[:raw "TYPE"]] rst))
+(defn ->set-ddl [columns]
+  (->
+    (for [[column-name column] columns]
+      (for [[op value] column]
+        (match [op value]
+          [:type _] {:alter-column [column-name :type value]}
+          [:optional true] {:alter-column [column-name :set [:not nil]]}
+          [:optional false] {:alter-column [column-name :drop [:not nil]]}
+          [:primary-key? true] {:add-index [:primary-key column-name]}
+          [:primary-key? false] {:drop-index [:primary-key column-name]}
+          [:foreign-key? ref] {:add-constraint [(str (name column-name) "-fk") [:foreign-key] [:references ref]]}
+          [:foreign-key? false] {:drop-constraint [(str (name column-name) "-fk")]})))
+    flatten))
 
 
-(defn merge-columns [col1 col2]
-  (let [max-count (max (count col1) (count col2))
-        result (loop [i      0
-                      result []]
-                 (if (= i max-count)
-                   result
-                   (recur
-                     (inc i)
-                     (conj result (or (get col1 i)
-                                    (get col2 i))))))]
-    (if (second col2)
-      (inject-type result)
-      result)))
+(defn ->drop-ddl [columns]
+  (->
+    (for [[column-name column] columns]
+      (for [[op value] column]
+        (match [op value]
+          [:optional 0] {:alter-column [column-name :drop [:not nil]]}
+          [:primary-key? 0] {:drop-index [:primary-key column-name]}
+          [:foreign-key? 0] {:drop-constraint [(str (name column-name) "-fk")]})))
+    flatten))
 
 
-(defn prep-changes [db-ddl entity-ddl]
-  (let [db-ddl-cols     (->named-maps db-ddl)
-        entity-ddl-cols (->named-maps entity-ddl)
-        [db-changes entity-changes common] (data/diff db-ddl-cols entity-ddl-cols)
-        all-keys        (set (concat (keys db-changes) (keys entity-changes)))]
-    (when (not-empty all-keys)
-      (reduce (fn [acc key]
-                (cond
-                  (and (or (contains? entity-changes key)
-                           (contains? db-changes key))
-                       (contains? common key))
-                  (let [entity (get entity-changes key)
-                        common (get common key)
-                        column (if (some? entity)
-                                 (merge-columns entity common)
-                                 common)]
-                    (update acc :modify conj column))
-
-                  (and (contains? db-changes key)
-                       (not (contains? common key)))
-                  (update acc :delete conj key)
-
-                  (and (contains? entity-changes key)
-                       (not (contains? common key)))
-                  (->> (get entity-changes key)
-                       rest
-                       (remove nil?)
-                       (into [key])
-                       (update acc :add conj))))
-              {} all-keys))))
+(defn prep-changes [db-columns entity-columns]
+  (let [entity-fields  (-> entity-columns keys set)
+        db-fields      (-> db-columns keys set)
+        cols-to-add    (clojure.set/difference entity-fields db-fields)
+        cols-to-delete (clojure.set/difference db-fields entity-fields)
+        common-cols    (clojure.set/intersection db-fields entity-fields)
+        [alterations deletions] (differ/diff (select-keys db-columns common-cols)
+                                             (select-keys entity-columns common-cols))]
+    (concat (mapv #(hash-map :drop-column %)
+                  cols-to-delete)
+            (mapv (fn [col-name]
+                    (let [column (get entity-columns col-name)]
+                      (->> (column->modifiers column)
+                           (into [col-name (:type column)])
+                           (hash-map :add-column))))
+                  cols-to-add)
+            (->set-ddl alterations)
+            (->drop-ddl deletions))))
 
 
 (defn entity->migration [database migrations entity]
-  (let [table      (:table entity)
-        entity-ddl (entity->columns-ddl entity)]
+  (let [table (:table entity)]
     (if (not (table-exist? database table))
-      (->> entity-ddl
+      (->> (entity->columns-ddl entity)
            (create-table-ddl table)
            (sql/format)
            (conj migrations))
 
-      (let [db-columns (extract-db-columns database table)
-            db-ddl     (db-columns->columns-ddl db-columns)
-            changes    (prep-changes db-ddl entity-ddl)]
+      (let [db-columns     (get-db-columns database table)
+            entity-columns (get-entity-columns entity)
+            changes        (prep-changes db-columns entity-columns)]
         (some->> changes
                  (alter-table-ddl table)
                  (sql/format)

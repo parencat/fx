@@ -2,7 +2,8 @@
   (:require
    [clj-test-containers.core :as tc]
    [integrant.core :as ig]
-   [duct.core :as duct])
+   [duct.core :as duct]
+   [next.jdbc :as jdbc])
   (:import
    [org.testcontainers.containers PostgreSQLContainer]))
 
@@ -42,6 +43,25 @@
                                  :user     (.getUsername (:container container))
                                  :password (.getPassword (:container container))}
         :fx.containers/postgres {:container container}}))))
+
+
+;; test helper macro
+(defmacro with-connection [symbol & body]
+  `(let [container# (pg-container {:port 5432})
+         port#      (get (:mapped-ports container#) 5432)
+         host#      (:host container#)
+         user#      (.getUsername (:container container#))
+         password#  (.getPassword (:container container#))
+         url#       (str "jdbc:postgresql://" host# ":" port# "/test?user=" user# "&password=" password#)
+         ~symbol (jdbc/get-connection {:jdbcUrl url#})]
+     (let [result# (try
+                     (do ~@body)
+                     (catch Exception ex#
+                       {:cause (ex-cause ex#)
+                        :data  (ex-data ex#)}))]
+       (stop container#)
+       result#)))
+
 
 
 (comment
