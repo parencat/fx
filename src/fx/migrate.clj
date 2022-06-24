@@ -254,9 +254,10 @@
 
 (defn apply-migrations [{:keys [database entities]}]
   (let [migrations (prep-migrations database entities)]
-    (doseq [migration migrations]
-      (println "Running migration" migration)
-      (jdbc/execute! database migration))))
+    (jdbc/with-transaction [tx database]
+      (doseq [migration migrations]
+        (println "Running migration" migration)
+        (jdbc/execute! tx migration)))))
 
 
 ;; =============================================================================
