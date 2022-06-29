@@ -42,28 +42,28 @@
                                         :database connection})]
 
       (testing "table create"
-        (sut/apply-migrations {:database connection
-                               :entities [entity]})
+        (sut/apply-migrations! {:database connection
+                                :entities  [entity]})
 
         (is (sut/table-exist? connection "user"))
         (is (= #{"id" "name"}
                (->> (get-columns connection)
                     (map :column-name)
-                    set))))
+                    set)))))
 
-      (testing "table alter"
-        (let [entity (entity/create-entity :test-user
-                                           {:spec     (-> modified-user-schema entity/prepare-spec :spec)
-                                            :database connection})]
-          (sut/apply-migrations {:database connection
-                                 :entities [entity]})
-          (let [columns   (get-columns connection)
-                id-column (mdl/find-first #(= "id" (:column-name %)) columns)]
-            (is (= #{"id" "email"}
-                   (->> columns
-                        (map :column-name)
-                        set)))
-            (is (= "varchar" (:udt-name id-column)))))))))
+    (testing "table alter"
+      (let [entity (entity/create-entity :test-user
+                                         {:spec     (-> modified-user-schema entity/prepare-spec :spec)
+                                          :database connection})]
+        (sut/apply-migrations! {:database connection
+                                :entities  [entity]})
+        (let [columns   (get-columns connection)
+              id-column (mdl/find-first #(= "id" (:column-name %)) columns)]
+          (is (= #{"id" "email"}
+                 (->> columns
+                      (map :column-name)
+                      set)))
+          (is (= "varchar" (:udt-name id-column))))))))
 
 
 (def user-sql

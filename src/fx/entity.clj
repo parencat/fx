@@ -220,6 +220,18 @@
   (delete! [_]))
 
 
+(def entity?
+  (m/-simple-schema
+   {:type :entity/instance
+    :pred #(instance? Entity %)}))
+
+
+(def schema?
+  (m/-simple-schema
+   {:type :entity/schema
+    :pred m/schema?}))
+
+
 ;; =============================================================================
 ;; Entity constructor
 ;; =============================================================================

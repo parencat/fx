@@ -57,10 +57,11 @@
      (let [result# (try
                      (do ~@body)
                      (catch Exception ex#
-                       {:cause (ex-cause ex#)
-                        :data  (ex-data ex#)}))]
+                       ex#))]
        (stop container#)
-       result#)))
+       (if (instance? Exception result#)
+         (throw result#)
+         result#))))
 
 
 
