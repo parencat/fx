@@ -3,9 +3,9 @@
    [clojure.test :refer :all]
    [duct.core :as duct]
    [integrant.core :as ig]
-   [fx.repository :as repo]
    [next.jdbc :as jdbc]
-   [malli.instrument :as mi])
+   [malli.instrument :as mi]
+   [fx.entity :as fx.entity])
   (:import
    [java.sql Connection]))
 
@@ -74,15 +74,15 @@
             client-id  (random-uuid)
             user-id    (random-uuid)
             connection (get system :fx.database/connection)]
-        (is (satisfies? repo/PRepository role))
-        (is (satisfies? repo/PRepository client))
-        (is (satisfies? repo/PRepository user))
+        (is (satisfies? fx.entity/PEntity role))
+        (is (satisfies? fx.entity/PEntity client))
+        (is (satisfies? fx.entity/PEntity user))
 
         (testing "should create records in database"
-          (let [_role-res   (repo/create! role {:id role-id :name "test-role"})
-                _client-res (repo/create! client {:id client-id :name "test-client"})
-                user-res    (repo/create! user {:id     user-id :name "test-user" :last-name "test-last"
-                                                :client client-id :role role-id})
+          (let [_role-res   (fx.entity/create! role {:id role-id :name "test-role"})
+                _client-res (fx.entity/create! client {:id client-id :name "test-client"})
+                user-res    (fx.entity/create! user {:id     user-id :name "test-user" :last-name "test-last"
+                                                     :client client-id :role role-id})
 
                 new-role    (query-role connection role-id)
                 new-client  (query-client connection client-id)

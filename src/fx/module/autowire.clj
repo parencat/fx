@@ -4,7 +4,8 @@
    [clojure.java.classpath :as cp]
    [clojure.string]
    [clojure.tools.namespace.find :as tools.find]
-   [malli.core :as m]))
+   [malli.core :as m]
+   [fx.utils.loader :as loader]))
 
 
 (def ig-ref
@@ -59,7 +60,7 @@
    Returns a map containing all ns members who have AUTOWIRED-KEY meta"
   [namespaces]
   (->> (for [ns namespaces]
-         (let [_         (require ns :reload)
+         (let [_         (loader/require ns)
                members   (ns-publics ns)
                ns-string (str ns)]
            (reduce-kv (partial collect-autowired ns-string)

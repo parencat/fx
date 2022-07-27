@@ -12,7 +12,8 @@
    [medley.core :as mdl]
    [differ.core :as differ]
    [malli.core :as m]
-   [malli.util :as mu])
+   [malli.util :as mu]
+   [fx.utils.types :refer [connection?]])
   (:import
    [java.sql DatabaseMetaData Connection]))
 
@@ -138,11 +139,6 @@
         tables                     (-> metadata
                                        (.getTables nil nil table nil))]
     (.next tables)))
-
-(def connection?
-  (m/-simple-schema
-   {:type :db/connection
-    :pred #(instance? Connection %)}))
 
 (m/=> table-exist?
   [:=> [:cat connection? :string]
@@ -347,10 +343,11 @@
       (let [db-columns     (get-db-columns database table)
             entity-columns (get-entity-columns entity)
             changes        (prep-changes db-columns entity-columns)]
-        (some->> changes
-                 (alter-table-ddl table)
-                 (sql/format)
-                 (conj migrations))))))
+        (or (some->> changes
+                     (alter-table-ddl table)
+                     (sql/format)
+                     (conj migrations))
+            migrations)))))
 
 (m/=> entity->migration
   [:=> [:cat connection? [:vector [:vector :string]] fx.entity/entity?]
@@ -373,19 +370,19 @@
          (map (fn [e] (get emap e))))))
 
 (m/=> sort-by-dependencies
-  [:=> [:cat [:sequential fx.entity/entity?]]
+  [:=> [:cat [:set fx.entity/entity?]]
    [:sequential fx.entity/entity?]])
 
 
 (defn prep-migrations
   "Generates migrations for all entities in the system"
   [^Connection database entities]
-  (let [sorted-entities (sort-by-dependencies entities)]
-    (-> (partial entity->migration database)
-        (reduce [] sorted-entities))))
+  (let [sorted-entities    (sort-by-dependencies entities)
+        entity->migration' (partial entity->migration database)]
+    (reduce entity->migration' [] sorted-entities)))
 
 (m/=> prep-migrations
-  [:=> [:cat connection? [:vector fx.entity/entity?]]
+  [:=> [:cat connection? [:set fx.entity/entity?]]
    [:vector [:vector :string]]])
 
 
@@ -402,7 +399,7 @@
 (m/=> apply-migrations!
   [:=> [:cat [:map
               [:database connection?]
-              [:entities [:vector fx.entity/entity?]]]]
+              [:entities [:set fx.entity/entity?]]]]
    :nil])
 
 

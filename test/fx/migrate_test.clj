@@ -7,7 +7,8 @@
    [next.jdbc :as jdbc]
    [next.jdbc.result-set :as jdbc.rs]
    [malli.instrument :as mi]
-   [medley.core :as mdl]))
+   [medley.core :as mdl])
+  (:import [java.sql Connection]))
 
 
 (mi/instrument!)
@@ -37,13 +38,13 @@
 
 (deftest database-url-config-test
   (pg/with-connection connection
-    (let [entity (entity/create-entity :test-user
+    (let [entity (entity/create-entity :some/test-user
                                        {:spec     (-> user-schema entity/prepare-spec :spec)
                                         :database connection})]
 
       (testing "table create"
         (sut/apply-migrations! {:database connection
-                                :entities  [entity]})
+                                :entities  #{entity}})
 
         (is (sut/table-exist? connection "user"))
         (is (= #{"id" "name"}
@@ -52,11 +53,11 @@
                     set)))))
 
     (testing "table alter"
-      (let [entity (entity/create-entity :test-user
+      (let [entity (entity/create-entity :some/test-user
                                          {:spec     (-> modified-user-schema entity/prepare-spec :spec)
                                           :database connection})]
         (sut/apply-migrations! {:database connection
-                                :entities  [entity]})
+                                :entities  #{entity}})
         (let [columns   (get-columns connection)
               id-column (mdl/find-first #(= "id" (:column-name %)) columns)]
           (is (= #{"id" "email"}
@@ -90,6 +91,7 @@
       (is (= "uuid" (get id-column :type-name))))))
 
 
+
 (deftest get-db-columns-test
   (pg/with-connection connection
     (jdbc/execute! connection [user-sql])
@@ -106,9 +108,9 @@
 
 (deftest extract-entity-columns-test
   (let [user   (entity/create-entity
-                :test-user
+                :some/test-user
                 {:spec     (-> user-schema entity/prepare-spec :spec)
-                 :database nil})
+                 :database (reify Connection)})
         result (sut/get-entity-columns user)]
 
     (is (= {:id   {:type :uuid :primary-key? true}
