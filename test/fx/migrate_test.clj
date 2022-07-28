@@ -44,7 +44,7 @@
 
       (testing "table create"
         (sut/apply-migrations! {:database connection
-                                :entities  #{entity}})
+                                :entities #{entity}})
 
         (is (sut/table-exist? connection "user"))
         (is (= #{"id" "name"}
@@ -57,7 +57,7 @@
                                          {:spec     (-> modified-user-schema entity/prepare-spec :spec)
                                           :database connection})]
         (sut/apply-migrations! {:database connection
-                                :entities  #{entity}})
+                                :entities #{entity}})
         (let [columns   (get-columns connection)
               id-column (mdl/find-first #(= "id" (:column-name %)) columns)]
           (is (= #{"id" "email"}
@@ -123,21 +123,29 @@
     (is (= (sut/prep-changes {:id {:type :uuid}}
                              {:id   {:type :uuid}
                               :name {:type :string}})
-           '({:add-column [:name :string [:not nil]]}))))
+           {:rollbacks '({:drop-column :name})
+            :updates   '({:add-column [:name :string [:not nil]]})})))
 
   (testing "column deleted"
     (is (= (sut/prep-changes {:id   {:type :uuid}
                               :name {:type :string}}
                              {:id {:type :uuid}})
-           '({:drop-column :name}))))
+           {:rollbacks '({:add-column [:name :string [:not nil]]})
+            :updates   '({:drop-column :name})})))
 
   (testing "column modified"
     (is (= (sut/prep-changes {:id {:type :uuid :optional true}}
                              {:id {:type :string :primary-key? true}})
-           '({:alter-column [:id :type :string]}
-             {:add-index [:primary-key :id]}
-             {:alter-column [:id :drop [:not nil]]}))))
+           {:rollbacks '({:drop-index [:primary-key :id]}
+                         {:alter-column [:id :type :uuid]}
+                         {:alter-column [:id :set [:not nil]]})
+            :updates   '({:alter-column [:id :type :string]}
+                         {:add-index [:primary-key :id]}
+                         {:alter-column [:id :drop [:not nil]]})})))
 
   (testing "tables identical"
-    (is (empty? (sut/prep-changes {:id {:type :uuid}}
-                                  {:id {:type :uuid}})))))
+    (let [{:keys [rollbacks updates]}
+          (sut/prep-changes {:id {:type :uuid}}
+                            {:id {:type :uuid}})]
+      (is (empty? updates)
+          (empty? rollbacks)))))

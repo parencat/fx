@@ -4,9 +4,10 @@
    [duct.core :as duct]))
 
 
-(defmethod ig/init-key :fx.module/database [_ _]
+(defmethod ig/init-key :fx.module/database [_ {:keys [migrate]
+                                               :or   {migrate {}}}]
   (fn [config]
     (duct/merge-configs
      config
      {:fx.database/connection {}
-      :fx/migrate             {}})))
+      :fx/migrate             migrate})))
