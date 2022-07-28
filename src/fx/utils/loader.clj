@@ -1,9 +1,16 @@
 (ns fx.utils.loader
   (:refer-clojure :exclude [require])
   (:require
-   [clojure.string :as str])
+   [clojure.string :as str]
+   [malli.core :as m])
   (:import
    [clojure.lang DynamicClassLoader RT]))
+
+
+(def classloader?
+  (m/-simple-schema
+   {:type :classloader
+    :pred #(instance? ClassLoader %)}))
 
 
 (defonce ^:private shared-context-classloader
@@ -27,9 +34,17 @@
     :else
     false))
 
+(m/=> has-classloader-as-ancestor?
+  [:=> [:cat classloader? classloader?]
+   :boolean])
+
 
 (defn- has-shared-context-classloader-as-ancestor? [^ClassLoader classloader]
   (has-classloader-as-ancestor? classloader @shared-context-classloader))
+
+(m/=> has-shared-context-classloader-as-ancestor?
+  [:=> [:cat classloader?]
+   :boolean])
 
 
 (defn the-classloader ^ClassLoader []
@@ -40,6 +55,10 @@
    (let [shared-classloader @shared-context-classloader]
      (.setContextClassLoader (Thread/currentThread) shared-classloader)
      shared-classloader)))
+
+(m/=> the-classloader
+  [:=> :cat
+   classloader?])
 
 
 (defn- require* [& args]
@@ -55,13 +74,25 @@
                          :system-classpath (sort (str/split (System/getProperty "java.class.path") #"[:;]"))}
                         e))))))
 
+(m/=> require*
+  [:=> [:cat [:* :symbol]]
+   :nil])
+
 
 (defn require
   ([x]
-   (let [already-loaded? (and (symbol? x)
-                              ((loaded-libs) x))]
+   (let [libs            (loaded-libs)
+         already-loaded? (and (symbol? x)
+                              (contains? libs x))]
      (when-not already-loaded?
        (require* x))))
 
   ([x & more]
    (apply require* x more)))
+
+(m/=> require
+  [:function
+   [:=> [:cat :symbol]
+    :nil]
+   [:=> [:cat [:* :symbol]]
+    :nil]])
