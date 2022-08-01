@@ -13,7 +13,8 @@
    [differ.core :as differ]
    [malli.core :as m]
    [malli.util :as mu]
-   [fx.utils.types :refer [connection?]])
+   [fx.utils.types :refer [connection?]]
+   [clojure.java.io :as io])
   (:import
    [java.sql DatabaseMetaData Connection]))
 
@@ -404,11 +405,12 @@
   [entities]
   (let [graph (atom (dep/graph))
         emap  (into {} (map (fn [e] [(:entity e) e])) entities)]
+    ;; build the graph
     (doseq [e1 entities e2 entities]
       (if (fx.entity/depends-on? (:entity e1) (:entity e2))
         (reset! graph (dep/depend @graph (:entity e1) (:entity e2)))
         (reset! graph (dep/depend @graph (:entity e1) nil))))
-
+    ;; graph -> sorted list
     (->> @graph
          (dep/topo-sort)
          (remove nil?)
@@ -432,12 +434,40 @@
    [:sequential {:min 2 :max 2} vector?]])
 
 
-(defn prep-migrations
-  "Generates migrations for all entities in the system"
+(defn get-all-migrations
   [^Connection database entities]
-  (let [sorted-entities    (sort-by-dependencies entities)
-        entity->migration' (partial entity->migration database)
-        all-migrations     (reduce entity->migration' [] sorted-entities)
+  (let [sorted-entities (sort-by-dependencies entities)]
+    (reduce (fn [migrations entity]
+              (entity->migration database migrations entity))
+            [] sorted-entities)))
+
+(m/=> get-all-migrations
+  [:=> [:cat connection? [:set fx.entity/entity?]]
+   [:vector [:vector :string]]])
+
+
+(defn get-entity-migrations-map
+  [^Connection database entities]
+  (let [sorted-entities (sort-by-dependencies entities)]
+    (reduce (fn [migrations-map entity]
+              (let [migration (entity->migration database [] entity)]
+                (if (seq migration)
+                  (assoc migrations-map (:entity entity) {:up   (first migration)
+                                                          :down (second migration)})
+                  migrations-map)))
+            {} sorted-entities)))
+
+(m/=> get-entity-migrations-map
+  [:=> [:cat connection? [:set fx.entity/entity?]]
+   [:map-of :qualified-keyword [:map
+                                [:up [:vector :string]]
+                                [:down [:vector :string]]]]])
+
+
+(defn prep-migrations
+  "Generates migrations for all entities in the system (forward and backward)"
+  [^Connection database entities]
+  (let [all-migrations (get-all-migrations database entities)
         [migrations rollback-migrations] (unzip all-migrations)]
     {:migrations          migrations
      :rollback-migrations (-> rollback-migrations reverse vec)}))
@@ -481,9 +511,23 @@
    :nil])
 
 
-(defn store-migrations! [c])
+(defn store-migrations! [{:keys [^Connection database entities]}]
+  (let [migrations (get-entity-migrations-map database entities)
+        timestamp  (System/currentTimeMillis)]
+    (doseq [[entity migration] migrations]
+      ;; TODO expose options for filename prefix/pattern
+      (let [filename (format "resources/migrations/%d-%s-%s.edn" timestamp (namespace entity) (name entity))]
+        (io/make-parents filename)
+        (spit filename (str migration))))))
+
+(m/=> store-migrations!
+  [:=> [:cat [:map
+              [:database connection?]
+              [:entities [:set fx.entity/entity?]]]]
+   :nil])
+
+
 (defn validate-schema! [c])
-(defn print-entity-schema [c])
 
 
 ;; =============================================================================
@@ -503,7 +547,6 @@
           (:update :update-drop) (apply-migrations! config)
           :store (store-migrations! config)
           :validate (validate-schema! config)
-          :infer (print-entity-schema config)
           nil)]
     (merge config migration-result)))
 
