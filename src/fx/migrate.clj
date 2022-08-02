@@ -16,7 +16,8 @@
    [fx.utils.types :refer [connection?]]
    [clojure.java.io :as io])
   (:import
-   [java.sql DatabaseMetaData Connection]))
+   [java.sql DatabaseMetaData Connection]
+   [java.time Clock]))
 
 
 ;; =============================================================================
@@ -251,22 +252,22 @@
 (defn create-table-ddl
   "Returns HoneySQL formatted map representing create SQL clause"
   [table columns]
-  {:create-table table
-   :with-columns columns})
+  (sql/format {:create-table table
+               :with-columns columns}))
 
 
 (defn drop-table-ddl
   "Returns HoneySQL formatted map representing drop SQL clause"
   [table]
-  {:drop-table table})
+  (sql/format {:drop-table (keyword table)} {:quoted true}))
 
 
 (defn alter-table-ddl
   "Returns HoneySQL formatted map representing alter SQL clause"
   [table changes]
   (when-not (empty? changes)
-    {:alter-table
-     (into [table] changes)}))
+    (sql/format {:alter-table
+                 (into [table] changes)})))
 
 
 (defn column->modifiers
@@ -356,12 +357,29 @@
     [:rollbacks [:sequential map?]]]])
 
 
+(defn has-changes?
+  "Given the simplified existing and updated fields definition
+   will return true if there's a difference between them, otherwise false"
+  [db-columns entity-columns]
+  (let [entity-fields (-> entity-columns keys set)
+        db-fields     (-> db-columns keys set)
+        common-cols   (clojure.set/intersection db-fields entity-fields)
+        [alterations deletions] (differ/diff (select-keys db-columns common-cols)
+                                             (select-keys entity-columns common-cols))]
+    (not (and (empty? alterations)
+              (empty? deletions)))))
+
+(m/=> has-changes?
+  [:=> [:cat table-fields [:map-of :keyword :map]]
+   :boolean])
+
+
 (defn create-table
   "Adds two SQL commands to create DB table and to delete this table"
   [entity table migrations]
   (let [ddl    (entity->columns-ddl entity)
-        create (sql/format (create-table-ddl table ddl))
-        drop   (sql/format (drop-table-ddl table))]
+        create (create-table-ddl table ddl)
+        drop   (drop-table-ddl table)]
     (conj migrations create drop)))
 
 (m/=> create-table
@@ -376,8 +394,8 @@
         entity-columns (get-entity-columns entity)
         {:keys [updates rollbacks]} (prep-changes db-columns entity-columns)]
     (if (some? updates)
-      (let [updates   (sql/format (alter-table-ddl table updates))
-            rollbacks (sql/format (alter-table-ddl table rollbacks))]
+      (let [updates   (alter-table-ddl table updates)
+            rollbacks (alter-table-ddl table rollbacks)]
         (conj migrations updates rollbacks))
       migrations)))
 
@@ -479,6 +497,10 @@
     [:rollback-migrations [:vector [:vector :string]]]]])
 
 
+;; =============================================================================
+;; Strategies
+;; =============================================================================
+
 (defn apply-migrations!
   "Generates and applies migrations related to entities on database
    All migrations run in a single transaction"
@@ -511,9 +533,10 @@
    :nil])
 
 
-(defn store-migrations! [{:keys [^Connection database entities]}]
+(defn store-migrations! [{:keys [^Connection database entities ^Clock clock]
+                          :or   {clock (Clock/systemUTC)}}]
   (let [migrations (get-entity-migrations-map database entities)
-        timestamp  (System/currentTimeMillis)]
+        timestamp  (.millis clock)]
     (doseq [[entity migration] migrations]
       ;; TODO expose options for filename prefix/pattern
       (let [filename (format "resources/migrations/%d-%s-%s.edn" timestamp (namespace entity) (name entity))]
@@ -527,7 +550,14 @@
    :nil])
 
 
-(defn validate-schema! [c])
+(defn validate-schema! [{:keys [^Connection database entities]}]
+  (->> entities
+       (some (fn [{:keys [table] :as entity}]
+               (and (table-exist? database table)
+                    (let [db-columns     (get-db-columns database table)
+                          entity-columns (get-entity-columns entity)]
+                      (not (has-changes? db-columns entity-columns))))))
+       boolean))
 
 
 ;; =============================================================================
