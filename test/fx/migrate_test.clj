@@ -7,8 +7,11 @@
    [next.jdbc :as jdbc]
    [next.jdbc.result-set :as jdbc.rs]
    [malli.instrument :as mi]
-   [medley.core :as mdl])
-  (:import [java.sql Connection]))
+   [medley.core :as mdl]
+   [clojure.java.io :as io])
+  (:import
+   [java.sql Connection]
+   [java.time Clock Instant ZoneOffset]))
 
 
 (mi/instrument!)
@@ -27,44 +30,26 @@
    [:email string?]]) ;; added
 
 
+(def modified-user-name-schema
+  [:spec {:table "user"}
+   [:id {:primary-key? true} uuid?]])
+; [:name [:string {:max 250}]]
+
+
 (defn get-columns [connection]
-  (->> (jdbc/execute! connection
-                      ["SELECT *
-                      FROM information_schema.columns
-                      WHERE table_schema = 'public' AND table_name = 'user';"]
-                      {:return-keys true
-                       :builder-fn  jdbc.rs/as-unqualified-kebab-maps})))
+  (jdbc/execute!
+   connection
+   ["SELECT *
+     FROM information_schema.columns
+     WHERE table_schema = 'public' AND table_name = 'user';"]
+   {:return-keys true
+    :builder-fn  jdbc.rs/as-unqualified-kebab-maps}))
 
 
-(deftest database-url-config-test
-  (pg/with-connection connection
-    (let [entity (entity/create-entity :some/test-user
-                                       {:spec     (-> user-schema entity/prepare-spec :spec)
-                                        :database connection})]
-
-      (testing "table create"
-        (sut/apply-migrations! {:database connection
-                                :entities  #{entity}})
-
-        (is (sut/table-exist? connection "user"))
-        (is (= #{"id" "name"}
-               (->> (get-columns connection)
-                    (map :column-name)
-                    set)))))
-
-    (testing "table alter"
-      (let [entity (entity/create-entity :some/test-user
-                                         {:spec     (-> modified-user-schema entity/prepare-spec :spec)
-                                          :database connection})]
-        (sut/apply-migrations! {:database connection
-                                :entities  #{entity}})
-        (let [columns   (get-columns connection)
-              id-column (mdl/find-first #(= "id" (:column-name %)) columns)]
-          (is (= #{"id" "email"}
-                 (->> columns
-                      (map :column-name)
-                      set)))
-          (is (= "varchar" (:udt-name id-column))))))))
+(defn get-table-columns-names [connection]
+  (->> (get-columns connection)
+       (map :column-name)
+       set))
 
 
 (def user-sql
@@ -89,7 +74,6 @@
       (is (map? id-column))
       (is (contains? id-column :pk-name))
       (is (= "uuid" (get id-column :type-name))))))
-
 
 
 (deftest get-db-columns-test
@@ -123,21 +107,131 @@
     (is (= (sut/prep-changes {:id {:type :uuid}}
                              {:id   {:type :uuid}
                               :name {:type :string}})
-           '({:add-column [:name :string [:not nil]]}))))
+           {:rollbacks '({:drop-column :name})
+            :updates   '({:add-column [:name :string [:not nil]]})})))
 
   (testing "column deleted"
     (is (= (sut/prep-changes {:id   {:type :uuid}
                               :name {:type :string}}
                              {:id {:type :uuid}})
-           '({:drop-column :name}))))
+           {:rollbacks '({:add-column [:name :string [:not nil]]})
+            :updates   '({:drop-column :name})})))
 
   (testing "column modified"
     (is (= (sut/prep-changes {:id {:type :uuid :optional true}}
                              {:id {:type :string :primary-key? true}})
-           '({:alter-column [:id :type :string]}
-             {:add-index [:primary-key :id]}
-             {:alter-column [:id :drop [:not nil]]}))))
+           {:rollbacks '({:drop-index [:primary-key :id]}
+                         {:alter-column [:id :type :uuid]}
+                         {:alter-column [:id :set [:not nil]]})
+            :updates   '({:alter-column [:id :type :string]}
+                         {:add-index [:primary-key :id]}
+                         {:alter-column [:id :drop [:not nil]]})})))
 
   (testing "tables identical"
-    (is (empty? (sut/prep-changes {:id {:type :uuid}}
-                                  {:id {:type :uuid}})))))
+    (let [{:keys [rollbacks updates]}
+          (sut/prep-changes {:id {:type :uuid}}
+                            {:id {:type :uuid}})]
+      (is (empty? updates)
+          (empty? rollbacks)))))
+
+
+(deftest apply-migrations-test
+  (pg/with-connection connection
+    (let [entity (entity/create-entity :some/test-user
+                                       {:spec     (-> user-schema entity/prepare-spec :spec)
+                                        :database connection})]
+
+      (testing "table create"
+        (sut/apply-migrations! {:database connection
+                                :entities #{entity}})
+
+        (is (sut/table-exist? connection "user"))
+        (is (= #{"id" "name"}
+               (->> (get-columns connection)
+                    (map :column-name)
+                    set)))))
+
+    (testing "table alter"
+      (let [entity (entity/create-entity :some/test-user
+                                         {:spec     (-> modified-user-schema entity/prepare-spec :spec)
+                                          :database connection})]
+        (sut/apply-migrations! {:database connection
+                                :entities #{entity}})
+        (let [columns   (get-columns connection)
+              id-column (mdl/find-first #(= "id" (:column-name %)) columns)]
+          (is (= #{"id" "email"}
+                 (->> columns
+                      (map :column-name)
+                      set)))
+          (is (= "varchar" (:udt-name id-column))))))))
+
+
+(deftest drop-migrations-test
+  (pg/with-connection connection
+    (let [entity (entity/create-entity :some/test-user
+                                       {:spec     (-> user-schema entity/prepare-spec :spec)
+                                        :database connection})
+          {:keys [rollback-migrations]} (sut/apply-migrations! {:database connection
+                                                                :entities #{entity}})]
+      (is (sut/table-exist? connection "user"))
+
+      (testing "partial rollback"
+        (is (-> (get-table-columns-names connection)
+                (contains? "name"))
+            "name field should be in DB")
+
+        (let [entity (entity/create-entity :some/test-user
+                                           {:spec     (-> modified-user-name-schema entity/prepare-spec :spec)
+                                            :database connection})
+              {:keys [rollback-migrations]} (sut/apply-migrations! {:database connection
+                                                                    :entities #{entity}})]
+          (is (not (-> (get-table-columns-names connection)
+                       (contains? "name")))
+              "after running migrations name field shouldn't exist")
+
+          (sut/drop-migrations! connection rollback-migrations)
+
+          (is (-> (get-table-columns-names connection)
+                  (contains? "name"))
+              "name field should be created again")))
+
+      (is (sut/table-exist? connection "user"))
+
+      (testing "table should be dropped"
+        (sut/drop-migrations! connection rollback-migrations)
+        (is (not (sut/table-exist? connection "user")))))))
+
+
+(deftest store-migrations-test
+  (pg/with-connection connection
+    (let [entity      (entity/create-entity :some/test-user
+                                            {:spec     (-> user-schema entity/prepare-spec :spec)
+                                             :database connection})
+          fixed-clock (Clock/fixed (Instant/now) ZoneOffset/UTC)]
+      (sut/store-migrations! {:database connection
+                              :entities #{entity}
+                              :clock    fixed-clock})
+      (testing "migration file should be created"
+        (let [path      (format "resources/migrations/%d-%s-%s.edn" (.millis fixed-clock) "some" "test-user")
+              migration (io/file path)]
+          (is (.exists migration))
+
+          (io/delete-file migration)
+          (io/delete-file (io/file "resources/migrations")))))))
+
+
+(deftest validate-schema-test
+  (pg/with-connection connection
+    (let [entity (entity/create-entity :some/test-user
+                                       {:spec     (-> user-schema entity/prepare-spec :spec)
+                                        :database connection})]
+      (is (false? (sut/validate-schema! {:database connection
+                                         :entities #{entity}}))
+          "user doesn't created yet")
+
+      (sut/apply-migrations! {:database connection
+                              :entities #{entity}})
+
+      (is (sut/validate-schema! {:database connection
+                                 :entities #{entity}})
+          "db schema and entity should match"))))

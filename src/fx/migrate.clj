@@ -13,9 +13,11 @@
    [differ.core :as differ]
    [malli.core :as m]
    [malli.util :as mu]
-   [fx.utils.types :refer [connection?]])
+   [fx.utils.types :refer [connection?]]
+   [clojure.java.io :as io])
   (:import
-   [java.sql DatabaseMetaData Connection]))
+   [java.sql DatabaseMetaData Connection]
+   [java.time Clock]))
 
 
 ;; =============================================================================
@@ -250,16 +252,22 @@
 (defn create-table-ddl
   "Returns HoneySQL formatted map representing create SQL clause"
   [table columns]
-  {:create-table table
-   :with-columns columns})
+  (sql/format {:create-table table
+               :with-columns columns}))
+
+
+(defn drop-table-ddl
+  "Returns HoneySQL formatted map representing drop SQL clause"
+  [table]
+  (sql/format {:drop-table (keyword table)} {:quoted true}))
 
 
 (defn alter-table-ddl
   "Returns HoneySQL formatted map representing alter SQL clause"
   [table changes]
   (when-not (empty? changes)
-    {:alter-table
-     (into [table] changes)}))
+    (sql/format {:alter-table
+                 (into [table] changes)})))
 
 
 (defn column->modifiers
@@ -293,7 +301,7 @@
    flatten))
 
 
-(defn ->drop-ddl
+(defn ->constraints-drop-ddl
   "Converts table fields to the list of HoneySQL drop clauses"
   [columns]
   (->
@@ -306,6 +314,20 @@
    flatten))
 
 
+(defn ->add-ddl [all-columns cols-to-add]
+  (mapv (fn [col-name]
+          (let [column (get all-columns col-name)]
+            (->> (column->modifiers column)
+                 (into [col-name (:type column)])
+                 (hash-map :add-column))))
+        cols-to-add))
+
+
+(defn ->drop-ddl [cols-to-delete]
+  (mapv #(hash-map :drop-column %)
+        cols-to-delete))
+
+
 (defn prep-changes
   "Given the simplified existing and updated fields definition
    will return a set of HoneySQL clauses to eliminate the difference"
@@ -316,17 +338,70 @@
         cols-to-delete (clojure.set/difference db-fields entity-fields)
         common-cols    (clojure.set/intersection db-fields entity-fields)
         [alterations deletions] (differ/diff (select-keys db-columns common-cols)
+                                             (select-keys entity-columns common-cols))
+        [rb-alterations rb-deletions] (differ/diff (select-keys entity-columns common-cols)
+                                                   (select-keys db-columns common-cols))]
+    {:updates   (concat (->drop-ddl cols-to-delete)
+                        (->add-ddl entity-columns cols-to-add)
+                        (->set-ddl alterations)
+                        (->constraints-drop-ddl deletions))
+     :rollbacks (concat (->drop-ddl cols-to-add)
+                        (->constraints-drop-ddl rb-deletions)
+                        (->add-ddl db-columns cols-to-delete)
+                        (->set-ddl rb-alterations))}))
+
+(m/=> prep-changes
+  [:=> [:cat table-fields [:map-of :keyword :map]]
+   [:map
+    [:updates [:sequential map?]]
+    [:rollbacks [:sequential map?]]]])
+
+
+(defn has-changes?
+  "Given the simplified existing and updated fields definition
+   will return true if there's a difference between them, otherwise false"
+  [db-columns entity-columns]
+  (let [entity-fields (-> entity-columns keys set)
+        db-fields     (-> db-columns keys set)
+        common-cols   (clojure.set/intersection db-fields entity-fields)
+        [alterations deletions] (differ/diff (select-keys db-columns common-cols)
                                              (select-keys entity-columns common-cols))]
-    (concat (mapv #(hash-map :drop-column %)
-                  cols-to-delete)
-            (mapv (fn [col-name]
-                    (let [column (get entity-columns col-name)]
-                      (->> (column->modifiers column)
-                           (into [col-name (:type column)])
-                           (hash-map :add-column))))
-                  cols-to-add)
-            (->set-ddl alterations)
-            (->drop-ddl deletions))))
+    (not (and (empty? alterations)
+              (empty? deletions)))))
+
+(m/=> has-changes?
+  [:=> [:cat table-fields [:map-of :keyword :map]]
+   :boolean])
+
+
+(defn create-table
+  "Adds two SQL commands to create DB table and to delete this table"
+  [entity table migrations]
+  (let [ddl    (entity->columns-ddl entity)
+        create (create-table-ddl table ddl)
+        drop   (drop-table-ddl table)]
+    (conj migrations create drop)))
+
+(m/=> create-table
+  [:=> [:cat fx.entity/entity? :string vector?]
+   vector?])
+
+
+(defn update-table
+  "Adds two SQL commands to update fields and to rollback all updates"
+  [database entity table migrations]
+  (let [db-columns     (get-db-columns database table)
+        entity-columns (get-entity-columns entity)
+        {:keys [updates rollbacks]} (prep-changes db-columns entity-columns)]
+    (if (some? updates)
+      (let [updates   (alter-table-ddl table updates)
+            rollbacks (alter-table-ddl table rollbacks)]
+        (conj migrations updates rollbacks))
+      migrations)))
+
+(m/=> update-table
+  [:=> [:cat connection? fx.entity/entity? :string vector?]
+   vector?])
 
 
 (defn entity->migration
@@ -335,19 +410,8 @@
   [^Connection database migrations entity]
   (let [table (:table entity)]
     (if (not (table-exist? database table))
-      (->> (entity->columns-ddl entity)
-           (create-table-ddl table)
-           (sql/format)
-           (conj migrations))
-
-      (let [db-columns     (get-db-columns database table)
-            entity-columns (get-entity-columns entity)
-            changes        (prep-changes db-columns entity-columns)]
-        (or (some->> changes
-                     (alter-table-ddl table)
-                     (sql/format)
-                     (conj migrations))
-            migrations)))))
+      (create-table entity table migrations)
+      (update-table database entity table migrations))))
 
 (m/=> entity->migration
   [:=> [:cat connection? [:vector [:vector :string]] fx.entity/entity?]
@@ -359,11 +423,12 @@
   [entities]
   (let [graph (atom (dep/graph))
         emap  (into {} (map (fn [e] [(:entity e) e])) entities)]
+    ;; build the graph
     (doseq [e1 entities e2 entities]
       (if (fx.entity/depends-on? (:entity e1) (:entity e2))
         (reset! graph (dep/depend @graph (:entity e1) (:entity e2)))
         (reset! graph (dep/depend @graph (:entity e1) nil))))
-
+    ;; graph -> sorted list
     (->> @graph
          (dep/topo-sort)
          (remove nil?)
@@ -374,33 +439,125 @@
    [:sequential fx.entity/entity?]])
 
 
-(defn prep-migrations
-  "Generates migrations for all entities in the system"
-  [^Connection database entities]
-  (let [sorted-entities    (sort-by-dependencies entities)
-        entity->migration' (partial entity->migration database)]
-    (reduce entity->migration' [] sorted-entities)))
+(defn unzip
+  "Reverse operation to interleave function
+   e.g. [1 2 3 4] -> ([1 3] [2 4])"
+  [coll]
+  (->> coll
+       (partition 2 2 (repeat nil))
+       (apply map vector)))
 
-(m/=> prep-migrations
+(m/=> unzip
+  [:=> [:cat sequential?]
+   [:sequential {:min 2 :max 2} vector?]])
+
+
+(defn get-all-migrations
+  [^Connection database entities]
+  (let [sorted-entities (sort-by-dependencies entities)]
+    (reduce (fn [migrations entity]
+              (entity->migration database migrations entity))
+            [] sorted-entities)))
+
+(m/=> get-all-migrations
   [:=> [:cat connection? [:set fx.entity/entity?]]
    [:vector [:vector :string]]])
 
+
+(defn get-entity-migrations-map
+  [^Connection database entities]
+  (let [sorted-entities (sort-by-dependencies entities)]
+    (reduce (fn [migrations-map entity]
+              (let [migration (entity->migration database [] entity)]
+                (if (seq migration)
+                  (assoc migrations-map (:entity entity) {:up   (first migration)
+                                                          :down (second migration)})
+                  migrations-map)))
+            {} sorted-entities)))
+
+(m/=> get-entity-migrations-map
+  [:=> [:cat connection? [:set fx.entity/entity?]]
+   [:map-of :qualified-keyword [:map
+                                [:up [:vector :string]]
+                                [:down [:vector :string]]]]])
+
+
+(defn prep-migrations
+  "Generates migrations for all entities in the system (forward and backward)"
+  [^Connection database entities]
+  (let [all-migrations (get-all-migrations database entities)
+        [migrations rollback-migrations] (unzip all-migrations)]
+    {:migrations          migrations
+     :rollback-migrations (-> rollback-migrations reverse vec)}))
+
+(m/=> prep-migrations
+  [:=> [:cat connection? [:set fx.entity/entity?]]
+   [:map
+    [:migrations [:vector [:vector :string]]]
+    [:rollback-migrations [:vector [:vector :string]]]]])
+
+
+;; =============================================================================
+;; Strategies
+;; =============================================================================
 
 (defn apply-migrations!
   "Generates and applies migrations related to entities on database
    All migrations run in a single transaction"
   [{:keys [^Connection database entities]}]
-  (let [migrations (prep-migrations database entities)]
+  (let [{:keys [migrations rollback-migrations]} (prep-migrations database entities)]
     (jdbc/with-transaction [tx database]
       (doseq [migration migrations]
         (println "Running migration" migration)
-        (jdbc/execute! tx migration)))))
+        (jdbc/execute! tx migration)))
+    {:rollback-migrations rollback-migrations}))
 
 (m/=> apply-migrations!
   [:=> [:cat [:map
               [:database connection?]
               [:entities [:set fx.entity/entity?]]]]
+   [:map
+    [:rollback-migrations [:vector [:vector :string]]]]])
+
+
+(defn drop-migrations!
+  "Rollback all changes made by apply-migrations! call"
+  [^Connection database rollback-migrations]
+  (jdbc/with-transaction [tx database]
+    (doseq [migration rollback-migrations]
+      (println "Rolling back" migration)
+      (jdbc/execute! tx migration))))
+
+(m/=> drop-migrations!
+  [:=> [:cat connection? [:vector [:vector :string]]]
    :nil])
+
+
+(defn store-migrations! [{:keys [^Connection database entities ^Clock clock]
+                          :or   {clock (Clock/systemUTC)}}]
+  (let [migrations (get-entity-migrations-map database entities)
+        timestamp  (.millis clock)]
+    (doseq [[entity migration] migrations]
+      ;; TODO expose options for filename prefix/pattern
+      (let [filename (format "resources/migrations/%d-%s-%s.edn" timestamp (namespace entity) (name entity))]
+        (io/make-parents filename)
+        (spit filename (str migration))))))
+
+(m/=> store-migrations!
+  [:=> [:cat [:map
+              [:database connection?]
+              [:entities [:set fx.entity/entity?]]]]
+   :nil])
+
+
+(defn validate-schema! [{:keys [^Connection database entities]}]
+  (->> entities
+       (some (fn [{:keys [table] :as entity}]
+               (and (table-exist? database table)
+                    (let [db-columns     (get-db-columns database table)
+                          entity-columns (get-entity-columns entity)]
+                      (not (has-changes? db-columns entity-columns))))))
+       boolean))
 
 
 ;; =============================================================================
@@ -408,10 +565,22 @@
 ;; =============================================================================
 
 (defmethod ig/prep-key :fx/migrate [_ config]
-  (merge config
+  (merge {:strategy :none}
+         config
          {:database (ig/ref :fx.database/connection)
           :entities (ig/refset :fx/entity)}))
 
 
-(defmethod ig/init-key :fx/migrate [_ config]
-  (apply-migrations! config))
+(defmethod ig/init-key :fx/migrate [_ {:keys [strategy] :as config}]
+  (let [migration-result
+        (case strategy
+          (:update :update-drop) (apply-migrations! config)
+          :store (store-migrations! config)
+          :validate (validate-schema! config)
+          nil)]
+    (merge config migration-result)))
+
+
+(defmethod ig/halt-key! :fx/migrate [_ {:keys [^Connection database strategy rollback-migrations]}]
+  (when (= strategy :update-drop)
+    (drop-migrations! database rollback-migrations)))

@@ -45,7 +45,7 @@
 (def simple-config
   {:duct.profile/base                 {:duct.core/project-ns 'test}
    :fx.module/autowire                {:root 'fx.entity-test}
-   :fx.module/database                {}
+   :fx.module/database                {:migrate {:strategy :update-drop}}
    :fx.containers.postgres/connection {}})
 
 
