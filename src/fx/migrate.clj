@@ -13,7 +13,7 @@
    [differ.core :as differ]
    [malli.core :as m]
    [malli.util :as mu]
-   [fx.utils.types :refer [connection?]]
+   [fx.utils.types :refer [connection? clock?]]
    [clojure.java.io :as io])
   (:import
    [java.sql DatabaseMetaData Connection]
@@ -533,20 +533,44 @@
    :nil])
 
 
-(defn store-migrations! [{:keys [^Connection database entities ^Clock clock]
+(def vars-matcher
+  "Regex that matches string template variables"
+  #"\$\{[^\$\{\}]+\}")
+
+
+(defn interpolate [template replacement]
+  (str/replace template
+               vars-matcher
+               (fn [variable]
+                 (let [end      (- (count variable) 1)
+                       key-name (keyword (subs variable 2 end))]
+                   (str (get replacement key-name ""))))))
+
+
+(def default-path-pattern
+  "resources/migrations/${timestamp}-${entity-ns}-${entity}.edn")
+
+
+(defn store-migrations! [{:keys [^Connection database entities ^Clock clock path-pattern path-params]
                           :or   {clock (Clock/systemUTC)}}]
   (let [migrations (get-entity-migrations-map database entities)
         timestamp  (.millis clock)]
     (doseq [[entity migration] migrations]
-      ;; TODO expose options for filename prefix/pattern
-      (let [filename (format "resources/migrations/%d-%s-%s.edn" timestamp (namespace entity) (name entity))]
+      (let [filename (interpolate (or path-pattern default-path-pattern)
+                                  (merge path-params
+                                         {:timestamp timestamp
+                                          :entity-ns (namespace entity)
+                                          :entity    (name entity)}))]
         (io/make-parents filename)
         (spit filename (str migration))))))
 
 (m/=> store-migrations!
   [:=> [:cat [:map
               [:database connection?]
-              [:entities [:set fx.entity/entity?]]]]
+              [:entities [:set fx.entity/entity?]]
+              [:clock {:optional true} clock?]
+              [:path-pattern {:optional true} :string]
+              [:path-params {:optional true} [:map-of :keyword :any]]]]
    :nil])
 
 

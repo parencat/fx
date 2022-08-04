@@ -202,24 +202,6 @@
         (is (not (sut/table-exist? connection "user")))))))
 
 
-(deftest store-migrations-test
-  (pg/with-connection connection
-    (let [entity      (entity/create-entity :some/test-user
-                                            {:spec     (-> user-schema entity/prepare-spec :spec)
-                                             :database connection})
-          fixed-clock (Clock/fixed (Instant/now) ZoneOffset/UTC)]
-      (sut/store-migrations! {:database connection
-                              :entities #{entity}
-                              :clock    fixed-clock})
-      (testing "migration file should be created"
-        (let [path      (format "resources/migrations/%d-%s-%s.edn" (.millis fixed-clock) "some" "test-user")
-              migration (io/file path)]
-          (is (.exists migration))
-
-          (io/delete-file migration)
-          (io/delete-file (io/file "resources/migrations")))))))
-
-
 (deftest validate-schema-test
   (pg/with-connection connection
     (let [entity (entity/create-entity :some/test-user
@@ -235,3 +217,43 @@
       (is (sut/validate-schema! {:database connection
                                  :entities #{entity}})
           "db schema and entity should match"))))
+
+
+(deftest store-migrations-test
+  (pg/with-connection connection
+    (let [entity      (entity/create-entity :some/test-user
+                                            {:spec     (-> user-schema entity/prepare-spec :spec)
+                                             :database connection})
+          fixed-clock (Clock/fixed (Instant/now) ZoneOffset/UTC)]
+      (testing "migration file should be created"
+        (sut/store-migrations! {:database connection
+                                :entities #{entity}
+                                :clock    fixed-clock})
+        (let [path      (format "resources/migrations/%d-%s-%s.edn" (.millis fixed-clock) "some" "test-user")
+              migration (io/file path)]
+          (is (.exists migration))
+
+          (io/delete-file migration)
+          (io/delete-file (io/file "resources/migrations"))))
+
+      (testing "migration file should follow the path pattern"
+        (sut/store-migrations! {:database     connection
+                                :entities     #{entity}
+                                :clock        fixed-clock
+                                :path-pattern "resources/some/${entity}/${number}.edn"
+                                :path-params  {:number 123}})
+        (let [path      "resources/some/test-user/123.edn"
+              migration (io/file path)]
+          (is (.exists migration))
+
+          (io/delete-file migration)
+          (io/delete-file (io/file "resources/some/test-user"))
+          (io/delete-file (io/file "resources/some")))))))
+
+
+(deftest interpolate-test
+  (are [test result] (= result (sut/interpolate (first test) (second test)))
+    ["my name is ${name}" {:name "John"}] "my name is John"
+    ["${name}" {:name "John"}] "John"
+    ["/${host}:${port}/path" {:host "www.test.com" :port 8080}] "/www.test.com:8080/path"
+    ["resources/${folder}/${name}.edn" {:folder "migrations" :name "user"}] "resources/migrations/user.edn"))
