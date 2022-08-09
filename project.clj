@@ -1,4 +1,4 @@
-(defproject org.clojars.tka4enko/fx "0.1.1"
+(defproject org.clojars.tka4enko/fx "0.1.2-SNAPSHOT"
   :description "Set of Duct modules for rapid clojure development"
   :url "https://github.com/Minoro-Ltd/fx-demo"
 
