@@ -453,6 +453,8 @@
 
 
 (defn get-all-migrations
+  "Returns a two-dimensional vector of migration strings for all changed entities.
+   For each entity will be two items 'SQL to apply changes' followed with 'SQL to drop changes'"
   [^Connection database entities]
   (let [sorted-entities (sort-by-dependencies entities)]
     (reduce (fn [migrations entity]
@@ -465,6 +467,7 @@
 
 
 (defn get-entity-migrations-map
+  "Returns a map of shape {:entity/name {:up 'SQL to apply changes' :down 'SQL to drop changes'}}"
   [^Connection database entities]
   (let [sorted-entities (sort-by-dependencies entities)]
     (reduce (fn [migrations-map entity]
@@ -538,7 +541,10 @@
   #"\$\{[^\$\{\}]+\}")
 
 
-(defn interpolate [template replacement]
+(defn interpolate
+  "Takes a template string with ${} placeholders and a hashmap with replacement values.
+   Returns interpolated string"
+  [template replacement]
   (str/replace template
                vars-matcher
                (fn [variable]
@@ -546,13 +552,19 @@
                        key-name (keyword (subs variable 2 end))]
                    (str (get replacement key-name ""))))))
 
+(m/=> interpolate
+  [:=> [:cat :string map?]
+   :string])
+
 
 (def default-path-pattern
   "resources/migrations/${timestamp}-${entity-ns}-${entity}.edn")
 
 
-(defn store-migrations! [{:keys [^Connection database entities ^Clock clock path-pattern path-params]
-                          :or   {clock (Clock/systemUTC)}}]
+(defn store-migrations!
+  "Writes entities migrations code into files in .edn format"
+  [{:keys [^Connection database entities ^Clock clock path-pattern path-params]
+    :or   {clock (Clock/systemUTC)}}]
   (let [migrations (get-entity-migrations-map database entities)
         timestamp  (.millis clock)]
     (doseq [[entity migration] migrations]
@@ -574,7 +586,10 @@
    :nil])
 
 
-(defn validate-schema! [{:keys [^Connection database entities]}]
+(defn validate-schema!
+  "Compares DB schema with entities specs.
+   Returns true if there's no changes false otherwise"
+  [{:keys [^Connection database entities]}]
   (->> entities
        (some (fn [{:keys [table] :as entity}]
                (and (table-exist? database table)
@@ -582,6 +597,12 @@
                           entity-columns (get-entity-columns entity)]
                       (not (has-changes? db-columns entity-columns))))))
        boolean))
+
+(m/=> validate-schema!
+  [:=> [:cat [:map
+              [:database connection?]
+              [:entities [:set fx.entity/entity?]]]]
+   :boolean])
 
 
 ;; =============================================================================
