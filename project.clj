@@ -11,7 +11,7 @@
                  [duct/core "0.8.0"]
                  [integrant "0.8.0"]
                  [weavejester/dependency "0.2.1"]
-                 [metosin/malli "0.8.4"]
+                 [metosin/malli "0.8.9"]
                  [medley "1.4.0"]
                  [differ "0.3.3"]
                  [com.github.seancorfield/next.jdbc "1.2.796"]
@@ -21,7 +21,7 @@
   :profiles
   {:dev {:dependencies [[vvvvalvalval/scope-capture "0.3.3-s1"]
                         [clj-test-containers "0.7.0"]
-                        [org.testcontainers/postgresql "1.17.2"]]}}
+                        [org.testcontainers/postgresql "1.17.3"]]}}
 
   :deploy-repositories
   [["clojars" {:sign-releases false
