@@ -271,7 +271,7 @@
 
 
 (defn column->modifiers
-  "Converts field to HonetSQL vector definition"
+  "Converts field to HoneySQL vector definition"
   [column]
   (cond-> []
           (not (:optional column)) (conj [:not nil])
@@ -388,7 +388,7 @@
 
 
 (defn update-table
-  "Adds two SQL commands to update fields and to rollback all updates"
+  "Adds two SQL commands to update fields and to roll back all updates"
   [database entity table migrations]
   (let [db-columns     (get-db-columns database table)
         entity-columns (get-entity-columns entity)

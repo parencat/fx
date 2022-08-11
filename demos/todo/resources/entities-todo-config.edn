@@ -1,0 +1,10 @@
+{:duct.profile/base
+ {:duct.core/project-ns todo}
+
+ :fx.module/autowire                {:root entities-todo}
+ :fx.module/database                {:migrate {:strategy :update-drop}}
+ :fx.containers.postgres/connection {}
+
+ :duct.profile/dev                  #duct/include "dev"
+ :duct.profile/local                #duct/include "local"
+ :duct.profile/prod                 {}}

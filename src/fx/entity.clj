@@ -26,18 +26,18 @@
   [:schema
    {:registry
     {::entity [:catn
-               [:entity keyword?]
+               [:entity :keyword]
                [:properties [:map [:table :string]]]
                [:fields [:* [:schema [:ref ::field]]]]]
      ::field  [:catn
-               [:name keyword?]
-               [:properties [:? [:map-of keyword? any?]]]
+               [:name [:or :string :keyword]]
+               [:properties [:? [:map-of :keyword :any]]]
                [:type ::type]]
      ::type   [:altn
                [:fn-schema fn?]
                [:type simple-keyword?]
-               [:type-with-props [:tuple keyword? map?]]
-               [:entity-ref-key qualified-keyword?]]}}
+               [:type-with-props [:tuple :keyword map?]]
+               [:entity-ref-key :qualified-keyword]]}}
    ::entity])
 
 
@@ -52,12 +52,12 @@
   [:schema
    {:registry
     {::entity [:catn
-               [:entity keyword?]
+               [:entity :keyword]
                [:properties [:map [:table :string]]]
                [:fields [:* [:schema [:ref ::field]]]]]
      ::field  [:catn
-               [:name keyword?]
-               [:properties [:? [:map-of keyword? any?]]]
+               [:name [:or :string :keyword]]
+               [:properties [:? [:map-of :keyword :any]]]
                [:type ::type]]
      ::type   [:altn
                [:fn-schema fn?]
@@ -65,9 +65,9 @@
                [:ref-type [:tuple
                            [:= :entity-ref]
                            [:map
-                            [:entity qualified-keyword?]
-                            [:entity-ref qualified-keyword?]]]]
-               [:type-with-props [:tuple keyword? map?]]]}}
+                            [:entity :qualified-keyword]
+                            [:entity-ref :qualified-keyword]]]]
+               [:type-with-props [:tuple :keyword map?]]]}}
    ::entity])
 
 
@@ -429,11 +429,11 @@
 (defn create-entity
   "Constructor function for entities"
   [entity config]
-  (let [{:keys [spec database]} config
+  (let [{:keys [spec database ctor] :or {ctor ->Entity}} config
         table (-> (m/properties spec {:registry entities-registry})
                   :table)]
     (register-entity! entity spec)
-    (->Entity database entity table)))
+    (ctor database entity table)))
 
 (m/=> create-entity
   [:=> [:cat

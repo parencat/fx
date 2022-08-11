@@ -1,4 +1,4 @@
-/target
+target
 /logs
 /classes
 /checkouts
@@ -6,7 +6,7 @@ pom.xml
 pom.xml.asc
 *.jar
 *.class
-/.lein-*
+.lein-*
 .nrepl-port
 .dir-locals.el
 profiles.clj

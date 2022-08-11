@@ -1,4 +1,4 @@
-(defproject org.clojars.tka4enko/fx "0.1.2-SNAPSHOT"
+(defproject org.clojars.tka4enko/fx "0.1.1"
   :description "Set of Duct modules for rapid clojure development"
   :url "https://github.com/Minoro-Ltd/fx-demo"
 
@@ -16,12 +16,12 @@
                  [differ "0.3.3"]
                  [com.github.seancorfield/next.jdbc "1.2.796"]
                  [com.github.seancorfield/honeysql "2.3.911"]
-                 [org.postgresql/postgresql "42.3.6"]]
+                 [org.postgresql/postgresql "42.3.6"]
+                 [clj-test-containers "0.7.0"]
+                 [org.testcontainers/postgresql "1.17.3"]]
 
   :profiles
-  {:dev {:dependencies [[vvvvalvalval/scope-capture "0.3.3-s1"]
-                        [clj-test-containers "0.7.0"]
-                        [org.testcontainers/postgresql "1.17.3"]]}}
+  {:dev {:dependencies [[vvvvalvalval/scope-capture "0.3.3-s1"]]}}
 
   :deploy-repositories
   [["clojars" {:sign-releases false

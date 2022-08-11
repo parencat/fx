@@ -1,14 +1,16 @@
-(ns todo.core
-  (:require [ring.adapter.jetty :as jetty]
-            [next.jdbc :as jdbc]
-            [next.jdbc.sql :as jdbc.sql]
-            [honey.sql :as sql]
-            [compojure.core :as compojure]
-            [compojure.route :as route]
-            [ring.middleware.json :as json]
-            [ring.middleware.params :as params])
-  (:import [org.eclipse.jetty.server Server]
-           [java.sql Connection]))
+(ns autowire-todo.core
+  (:require
+   [ring.adapter.jetty :as jetty]
+   [next.jdbc :as jdbc]
+   [next.jdbc.sql :as jdbc.sql]
+   [honey.sql :as sql]
+   [compojure.core :as compojure]
+   [compojure.route :as route]
+   [ring.middleware.json :as json]
+   [ring.middleware.params :as params])
+  (:import
+   [org.eclipse.jetty.server Server]
+   [java.sql Connection]))
 
 
 (defonce ids*
