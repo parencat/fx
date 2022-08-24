@@ -33,9 +33,9 @@
    Type could be complex e.g. [:string 250]"
   [entity]
   (-> entity
-      fx.entity/primary-key-schema
+      fx.entity/ident-field-schema
       val
-      fx.entity/entry-schema
+      fx.entity/field-schema
       schema->column-type))
 
 (m/=> get-ref-type
@@ -73,7 +73,7 @@
     (cond-> []
             (not (:optional props)) (conj [:not nil])
             (:primary-key? props) (conj [:primary-key])
-            (:foreign-key? props) (conj [:references [:raw (fx.entity/entry-schema-table entry-schema)]])
+            (:foreign-key? props) (conj [:references [:raw (fx.entity/ref-field-prop entry-schema)]])
             (:cascade? props) (conj [:raw "on delete cascade"]))))
 
 (m/=> schema->column-modifiers
@@ -85,9 +85,9 @@
   "Converts entity spec to a list of HoneySQL vectors representing individual fields
    e.g. [[:id :uuid [:not nil] [:primary-key]] ...]"
   [entity]
-  (->> (fx.entity/entity-entries (:entity entity))
+  (->> (fx.entity/entity-fields (:entity entity))
        (mapv (fn [[key schema]]
-               (-> [key (-> schema fx.entity/entry-schema schema->column-type)]
+               (-> [key (-> schema fx.entity/field-schema schema->column-type)]
                    (concat (schema->column-modifiers schema))
                    vec)))))
 
@@ -104,7 +104,7 @@
     (cond-> {}
             (some? (:optional props)) (assoc :optional (:optional props))
             (:primary-key? props) (assoc :primary-key? true)
-            (:foreign-key? props) (assoc :foreign-key? (fx.entity/entry-schema-table entry-schema))
+            (:foreign-key? props) (assoc :foreign-key? (fx.entity/ref-field-prop entry-schema))
             (:cascade? props) (assoc :cascade? true))))
 
 (m/=> schema->constraints-map
@@ -117,9 +117,9 @@
    e.g. {:id    {:type uuid?   :optional false :primary-key? true}
           :name {:type string? :optional true}}"
   [entity]
-  (->> (fx.entity/entity-entries (:entity entity))
+  (->> (fx.entity/entity-fields (:entity entity))
        (reduce (fn [acc [key schema]]
-                 (let [column (-> {:type (-> schema fx.entity/entry-schema schema->column-type)}
+                 (let [column (-> {:type (-> schema fx.entity/field-schema schema->column-type)}
                                   (merge (schema->constraints-map schema)))]
                    (assoc acc key column)))
                {})))

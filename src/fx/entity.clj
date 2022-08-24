@@ -4,11 +4,7 @@
    [malli.core :as m]
    [malli.error :as me]
    [malli.registry :as mr]
-   [next.jdbc :as jdbc]
-   [next.jdbc.result-set :as jdbc.rs]
-   [honey.sql :as sql]
-   [medley.core :as mdl]
-   [fx.utils.types :refer [connection?]])
+   [medley.core :as mdl])
   (:import
    [clojure.lang MapEntry]))
 
@@ -101,11 +97,11 @@
 
 
 (defn ->entity-ref
-  "Returns the ref name for given entity name e.g.
+  "Returns the entity ref type for given entity type e.g.
    :my-cool/entity -> :my-cool/entity-ref"
-  [entity]
-  (let [entity-ns       (namespace entity)
-        entity-name     (name entity)
+  [entity-type]
+  (let [entity-ns       (namespace entity-type)
+        entity-name     (name entity-type)
         entity-ref-name (str entity-name "-ref")]
     (keyword entity-ns entity-ref-name)))
 
@@ -133,8 +129,8 @@
 
 (defn register-entity-ref!
   "Adds the entity ref schema to the global registry"
-  [entity schema]
-  (swap! registry* assoc (->entity-ref entity) (->entity-ref-schema schema)))
+  [entity-type schema]
+  (swap! registry* assoc (->entity-ref entity-type) (->entity-ref-schema schema)))
 
 (m/=> register-entity-ref!
   [:=> [:cat :qualified-keyword entity-spec?]
@@ -143,9 +139,9 @@
 
 (defn register-entity!
   "Adds entity and its reference schemas to the global registry"
-  [entity schema]
-  (register-entity-ref! entity schema)
-  (swap! registry* assoc entity schema))
+  [entity-type schema]
+  (register-entity-ref! entity-type schema)
+  (swap! registry* assoc entity-type schema))
 
 (m/=> register-entity!
   [:=> [:cat :qualified-keyword entity-spec?]
@@ -156,41 +152,13 @@
 ;; Entity implementation
 ;; =============================================================================
 
-(defprotocol PEntity
-  (create! [_ params])
-  (update! [_])
-  (find! [_])
-  (find-all! [_])
-  (delete! [_]))
-
-
-(declare valid-entity? entity-columns entity-values)
-
-
-(defrecord Entity [database entity table]
-  PEntity
-  (create! [_ entity-map]
-    (valid-entity? entity entity-map)
-    (let [columns (entity-columns entity)
-          values  (entity-values entity entity-map)
-          query   (-> {:insert-into table}
-                      (assoc :columns columns)
-                      (assoc :values [values])
-                      (sql/format))]
-      (jdbc/execute-one! database query
-                         {:return-keys true
-                          :builder-fn  jdbc.rs/as-unqualified-kebab-maps})))
-
-  (update! [_])
-  (find! [_])
-  (find-all! [_])
-  (delete! [_]))
+(defrecord Entity [type])
 
 
 (def entity?
   (m/-simple-schema
-   {:type :entity/like
-    :pred #(satisfies? PEntity %)}))
+   {:type :entity/instance
+    :pred #(instance? Entity %)}))
 
 
 (def schema?
@@ -199,16 +167,16 @@
     :pred m/schema?}))
 
 
-(def entity-entry-schema?
+(def entity-field-schema?
   (m/-simple-schema
-   {:type :entity/entry-schema
+   {:type :entity/field-schema
     :pred #(and (map-entry? %)
                 (-> % val m/schema?))}))
 
 
-(def val-schema?
+(def field-schema?
   (m/-simple-schema
-   {:type :entity/entry-val-schema
+   {:type :entity/field-val-schema
     :pred #(= (m/type %) ::m/val)}))
 
 
@@ -239,38 +207,41 @@
 (defn valid-entity?
   "Check if data is aligned with entity spec"
   [entity data]
-  (or (m/validate entity data {:registry entities-registry})
-      (throw (ex-info (str "Invalid data for entity " entity)
-                      {:error (me/humanize (m/explain entity data {:registry entities-registry}))}))))
+  (let [entity-type (:type entity)]
+    (or (m/validate entity-type data {:registry entities-registry})
+        (throw (ex-info (str "Invalid data for entity " entity-type)
+                        {:error (me/humanize (m/explain entity-type data {:registry entities-registry}))})))))
 
 (m/=> valid-entity?
-  [:=> [:cat :qualified-keyword map?]
+  [:=> [:cat entity? map?]
    :boolean])
 
 
-(defn entity-entries
+(defn entity-fields
   "Return a list of entity fields specs (map-entries)"
   [entity]
-  (let [schema (mr/schema entities-registry entity)]
+  (let [entity-type (:type entity)
+        schema      (mr/schema entities-registry entity-type)]
     (->> (m/entries schema {:registry entities-registry})
          (filter (fn [entry]
                    (if-some [props (-> entry val m/properties)]
                      (not (optional-ref? props))
                      true))))))
 
-(m/=> entity-entries
-  [:=> [:cat :qualified-keyword]
-   [:sequential entity-entry-schema?]])
+(m/=> entity-fields
+  [:=> [:cat entity?]
+   [:sequential entity-field-schema?]])
 
 
 (defn entity-columns
   "Return a list of entity fields names (keywords)"
   [entity]
-  (->> (entity-entries entity)
-       (mapv key)))
+  (let [entity-type (:type entity)]
+    (->> (entity-fields entity-type)
+         (mapv key))))
 
 (m/=> entity-columns
-  [:=> [:cat :qualified-keyword]
+  [:=> [:cat entity?]
    [:sequential :keyword]])
 
 
@@ -279,19 +250,20 @@
    map -> table e.g.
    {:id 1 :name 'Jack'} -> [1 'Jack']"
   [entity data]
-  (let [columns          (entity-columns entity)
+  (let [entity-type      (:type entity)
+        columns          (entity-columns entity-type)
         get-columns-vals (apply juxt columns)]
     (get-columns-vals data)))
 
 (m/=> entity-values
-  [:=> [:cat :qualified-keyword map?]
+  [:=> [:cat entity? map?]
    [:vector :any]])
 
 
 (defn ref?
   "Check if type is a reference to another entity"
-  [type]
-  (let [props (m/properties type)]
+  [schema]
+  (let [props (m/properties schema)]
     (->> (:entity props)
          (mr/schema entities-registry)
          some?)))
@@ -301,18 +273,19 @@
    :boolean])
 
 
-(defn primary-key-schema
-  "Get the spec of a field which is marked as primary key"
+(defn ident-field-schema
+  "Get the spec of a field which is marked as identity field"
   [entity]
-  (let [schema (mr/schema entities-registry entity)]
+  (let [entity-type (:type entity)
+        schema      (mr/schema entities-registry entity-type)]
     (->> (m/entries schema {:registry entities-registry})
          (filter (fn [[_ v]]
-                   (-> v m/properties :primary-key?)))
+                   (-> v m/properties :identity?)))
          first)))
 
-(m/=> primary-key-schema
-  [:=> [:cat :qualified-keyword]
-   entity-entry-schema?])
+(m/=> ident-field-schema
+  [:=> [:cat entity?]
+   entity-field-schema?])
 
 
 (defn schema-type
@@ -335,49 +308,50 @@
    [:maybe map?]])
 
 
-(defn entry-schema
+(defn field-schema
   "Get the simplified definition of the field spec"
-  [entry-schema]
-  (when-let [schema (some-> entry-schema m/children first)]
+  [field-schema]
+  (when-let [schema (some-> field-schema m/children first)]
     {:type  (m/type schema)
      :props (m/properties schema)}))
 
-(m/=> entry-schema
-  [:=> [:cat val-schema?]
+(m/=> field-schema
+  [:=> [:cat field-schema?]
    [:map
     [:type [:or :symbol :keyword]]
     [:props [:maybe map?]]]])
 
 
-(defn entry-schema-table
-  "Get table name from field spec"
-  [entry-schema]
-  (when-let [schema (some-> entry-schema m/children first)]
+(defn ref-field-prop
+  "Get any property value from field spec"
+  [field-schema prop-key]
+  (when-let [schema (some-> field-schema m/children first)]
     (let [deps-schema (some->> (m/properties schema)
                                :entity
                                (mr/schema entities-registry))]
       (-> deps-schema
           (m/properties {:registry entities-registry})
-          :table))))
+          (get prop-key)))))
 
-(m/=> entry-schema-table
-  [:=> [:cat val-schema?]
-   :string])
+(m/=> ref-field-prop
+  [:=> [:cat field-schema? :keyword]
+   :any])
 
 
 (defn depends-on?
   "Check if one entity depends on the other as foreign tables in SQL"
   [target dependency]
-  (->> (entity-entries target)
+  (->> (entity-fields target)
        (filter (fn [[_ v]]
                  (let [entry-schema (-> v m/children first)]
                    (and (-> v m/properties :foreign-key?)
-                        (= dependency (-> entry-schema m/properties :entity))))))
+                        (= (:type dependency)
+                           (-> entry-schema m/properties :entity))))))
        not-empty
        boolean))
 
 (m/=> depends-on?
-  [:=> [:cat :qualified-keyword :qualified-keyword]
+  [:=> [:cat entity? entity?]
    :boolean])
 
 
@@ -428,19 +402,16 @@
 
 (defn create-entity
   "Constructor function for entities"
-  [entity config]
-  (let [{:keys [spec database ctor] :or {ctor ->Entity}} config
-        table (-> (m/properties spec {:registry entities-registry})
-                  :table)]
-    (register-entity! entity spec)
-    (ctor database entity table)))
+  [entity-type config]
+  (let [{:keys [spec]} config]
+    (register-entity! entity-type spec)
+    (->Entity entity-type)))
 
 (m/=> create-entity
   [:=> [:cat
         :qualified-keyword
         [:map
-         [:spec entity-spec?]
-         [:database connection?]]]
+         [:spec entity-spec?]]]
    entity?])
 
 
@@ -448,32 +419,31 @@
 ;; Duct integration
 ;; =============================================================================
 
-(defn entity-key->entity-name [entity-key]
+(defn entity-key->entity-type [entity-key]
   (if (vector? entity-key)
     (second entity-key)
     entity-key))
 
-(m/=> entity-key->entity-name
+(m/=> entity-key->entity-type
   [:=> [:cat [:or :qualified-keyword [:vector :qualified-keyword]]]
    :qualified-keyword])
 
 
 (defmethod ig/prep-key :fx/entity [entity-key raw-spec]
-  (let [entity      (entity-key->entity-name entity-key)
-        valid-spec? (m/validate EntityRawSpec raw-spec)]
+  (let [valid-spec? (m/validate EntityRawSpec raw-spec)]
 
     (when-not valid-spec?
-      (throw (ex-info (str "Invalid spec schema for entity " entity)
-                      {:error (me/humanize (m/explain EntityRawSpec raw-spec))})))
+      (let [entity-type (entity-key->entity-type entity-key)]
+        (throw (ex-info (str "Invalid spec schema for entity " entity-type)
+                        {:error (me/humanize (m/explain EntityRawSpec raw-spec))}))))
 
     (let [{:keys [spec deps]} (prepare-spec raw-spec)]
       (reduce (fn [acc dep-entity]
                 (assoc acc dep-entity (ig/ref [:fx/entity dep-entity])))
-              {:spec     spec
-               :database (ig/ref :fx.database/connection)}
+              {:spec spec}
               deps))))
 
 
 (defmethod ig/init-key :fx/entity [entity-key config]
-  (let [entity-name (entity-key->entity-name entity-key)]
-    (create-entity entity-name config)))
+  (let [entity-type (entity-key->entity-type entity-key)]
+    (create-entity entity-type config)))
