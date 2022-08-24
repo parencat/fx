@@ -4,7 +4,8 @@
    [malli.core :as m]
    [malli.error :as me]
    [malli.registry :as mr]
-   [medley.core :as mdl])
+   [medley.core :as mdl]
+   [fx.utils.common :as uc])
   (:import
    [clojure.lang MapEntry]))
 
@@ -23,10 +24,10 @@
    {:registry
     {::entity [:catn
                [:entity :keyword]
-               [:properties [:map [:table :string]]]
+               [:properties [:? map?]]
                [:fields [:* [:schema [:ref ::field]]]]]
      ::field  [:catn
-               [:name [:or :string :keyword]]
+               [:name :keyword]
                [:properties [:? [:map-of :keyword :any]]]
                [:type ::type]]
      ::type   [:altn
@@ -49,10 +50,10 @@
    {:registry
     {::entity [:catn
                [:entity :keyword]
-               [:properties [:map [:table :string]]]
+               [:properties [:? map?]]
                [:fields [:* [:schema [:ref ::field]]]]]
      ::field  [:catn
-               [:name [:or :string :keyword]]
+               [:name :keyword]
                [:properties [:? [:map-of :keyword :any]]]
                [:type ::type]]
      ::type   [:altn
@@ -308,6 +309,19 @@
    [:maybe map?]])
 
 
+(defn prop
+  "Get the property from entity by key"
+  [entity prop-key]
+  (let [entity-type (:type entity)]
+    (-> (mr/schema entities-registry entity-type)
+        (m/properties {:registry entities-registry})
+        (get prop-key))))
+
+(m/=> prop
+  [:=> [:cat entity? :keyword]
+   :any])
+
+
 (defn field-schema
   "Get the simplified definition of the field spec"
   [field-schema]
@@ -419,21 +433,11 @@
 ;; Duct integration
 ;; =============================================================================
 
-(defn entity-key->entity-type [entity-key]
-  (if (vector? entity-key)
-    (second entity-key)
-    entity-key))
-
-(m/=> entity-key->entity-type
-  [:=> [:cat [:or :qualified-keyword [:vector :qualified-keyword]]]
-   :qualified-keyword])
-
-
 (defmethod ig/prep-key :fx/entity [entity-key raw-spec]
   (let [valid-spec? (m/validate EntityRawSpec raw-spec)]
 
     (when-not valid-spec?
-      (let [entity-type (entity-key->entity-type entity-key)]
+      (let [entity-type (uc/entity-key->entity-type entity-key)]
         (throw (ex-info (str "Invalid spec schema for entity " entity-type)
                         {:error (me/humanize (m/explain EntityRawSpec raw-spec))}))))
 
@@ -445,5 +449,5 @@
 
 
 (defmethod ig/init-key :fx/entity [entity-key config]
-  (let [entity-type (entity-key->entity-type entity-key)]
+  (let [entity-type (uc/entity-key->entity-type entity-key)]
     (create-entity entity-type config)))

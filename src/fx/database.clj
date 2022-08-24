@@ -21,7 +21,7 @@
        :password password)
 
       (throw (ex-info "Please provide a valid database jdbc url or db spec map.
-                     See https://cljdoc.org/d/com.github.seancorfield/next.jdbc/1.2.780/api/next.jdbc#get-datasource"
+                       See https://cljdoc.org/d/com.github.seancorfield/next.jdbc/1.2.780/api/next.jdbc#get-datasource"
                       {:component :fx.database/connection})))))
 
 

@@ -10,4 +10,4 @@
     (duct/merge-configs
      config
      {:fx.database/connection {}
-      :fx/migrate             migrate})))
+      :fx.table/migrate       migrate})))

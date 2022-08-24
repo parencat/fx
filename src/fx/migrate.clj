@@ -68,12 +68,12 @@
 (defn schema->column-modifiers
   "Given an entity schema will return a vector of SQL field constraints, shaped as HoneySQL clauses
    e.g. [[:not nil] [:primary-key]]"
-  [entry-schema]
-  (let [props (fx.entity/properties entry-schema)]
+  [field-schema]
+  (let [props (fx.entity/properties field-schema)]
     (cond-> []
             (not (:optional props)) (conj [:not nil])
             (:primary-key? props) (conj [:primary-key])
-            (:foreign-key? props) (conj [:references [:raw (fx.entity/ref-field-prop entry-schema)]])
+            (:foreign-key? props) (conj [:references [:raw (fx.entity/ref-field-prop field-schema :table)]])
             (:cascade? props) (conj [:raw "on delete cascade"]))))
 
 (m/=> schema->column-modifiers
@@ -85,7 +85,7 @@
   "Converts entity spec to a list of HoneySQL vectors representing individual fields
    e.g. [[:id :uuid [:not nil] [:primary-key]] ...]"
   [entity]
-  (->> (fx.entity/entity-fields (:entity entity))
+  (->> (fx.entity/entity-fields entity)
        (mapv (fn [[key schema]]
                (-> [key (-> schema fx.entity/field-schema schema->column-type)]
                    (concat (schema->column-modifiers schema))
@@ -104,7 +104,7 @@
     (cond-> {}
             (some? (:optional props)) (assoc :optional (:optional props))
             (:primary-key? props) (assoc :primary-key? true)
-            (:foreign-key? props) (assoc :foreign-key? (fx.entity/ref-field-prop entry-schema))
+            (:foreign-key? props) (assoc :foreign-key? (fx.entity/ref-field-prop entry-schema :table))
             (:cascade? props) (assoc :cascade? true))))
 
 (m/=> schema->constraints-map
@@ -117,7 +117,7 @@
    e.g. {:id    {:type uuid?   :optional false :primary-key? true}
           :name {:type string? :optional true}}"
   [entity]
-  (->> (fx.entity/entity-fields (:entity entity))
+  (->> (fx.entity/entity-fields entity)
        (reduce (fn [acc [key schema]]
                  (let [column (-> {:type (-> schema fx.entity/field-schema schema->column-type)}
                                   (merge (schema->constraints-map schema)))]
@@ -408,7 +408,7 @@
   "Given an entity will check if some updates were introduced
    If so will return a set of SQL migrations string"
   [^Connection database migrations entity]
-  (let [table (:table entity)]
+  (let [table (fx.entity/prop entity :table)]
     (if (not (table-exist? database table))
       (create-table entity table migrations)
       (update-table database entity table migrations))))
@@ -455,31 +455,25 @@
 (defn get-all-migrations
   "Returns a two-dimensional vector of migration strings for all changed entities.
    For each entity will be two items 'SQL to apply changes' followed with 'SQL to drop changes'"
-  [^Connection database entities]
-  (let [sorted-entities (sort-by-dependencies entities)]
-    (reduce (fn [migrations entity]
-              (entity->migration database migrations entity))
-            [] sorted-entities)))
+  [^Connection database entity]
+  (entity->migration database [] entity))
 
 (m/=> get-all-migrations
-  [:=> [:cat connection? [:set fx.entity/entity?]]
+  [:=> [:cat connection? fx.entity/entity?]
    [:vector [:vector :string]]])
 
 
 (defn get-entity-migrations-map
   "Returns a map of shape {:entity/name {:up 'SQL to apply changes' :down 'SQL to drop changes'}}"
-  [^Connection database entities]
-  (let [sorted-entities (sort-by-dependencies entities)]
-    (reduce (fn [migrations-map entity]
-              (let [migration (entity->migration database [] entity)]
-                (if (seq migration)
-                  (assoc migrations-map (:entity entity) {:up   (first migration)
-                                                          :down (second migration)})
-                  migrations-map)))
-            {} sorted-entities)))
+  [^Connection database entity]
+  (let [migration (entity->migration database [] entity)]
+    (if (seq migration)
+      {(:type entity) {:up   (first migration)
+                       :down (second migration)}}
+      {})))
 
 (m/=> get-entity-migrations-map
-  [:=> [:cat connection? [:set fx.entity/entity?]]
+  [:=> [:cat connection? fx.entity/entity?]
    [:map-of :qualified-keyword [:map
                                 [:up [:vector :string]]
                                 [:down [:vector :string]]]]])
@@ -487,14 +481,14 @@
 
 (defn prep-migrations
   "Generates migrations for all entities in the system (forward and backward)"
-  [^Connection database entities]
-  (let [all-migrations (get-all-migrations database entities)
+  [^Connection database entity]
+  (let [all-migrations (get-all-migrations database entity)
         [migrations rollback-migrations] (unzip all-migrations)]
     {:migrations          migrations
      :rollback-migrations (-> rollback-migrations reverse vec)}))
 
 (m/=> prep-migrations
-  [:=> [:cat connection? [:set fx.entity/entity?]]
+  [:=> [:cat connection? fx.entity/entity?]
    [:map
     [:migrations [:vector [:vector :string]]]
     [:rollback-migrations [:vector [:vector :string]]]]])
@@ -507,8 +501,8 @@
 (defn apply-migrations!
   "Generates and applies migrations related to entities on database
    All migrations run in a single transaction"
-  [{:keys [^Connection database entities]}]
-  (let [{:keys [migrations rollback-migrations]} (prep-migrations database entities)]
+  [{:keys [^Connection database entity]}]
+  (let [{:keys [migrations rollback-migrations]} (prep-migrations database entity)]
     (jdbc/with-transaction [tx database]
       (doseq [migration migrations]
         (println "Running migration" migration)
@@ -518,7 +512,7 @@
 (m/=> apply-migrations!
   [:=> [:cat [:map
               [:database connection?]
-              [:entities [:set fx.entity/entity?]]]]
+              [:entity fx.entity/entity?]]]
    [:map
     [:rollback-migrations [:vector [:vector :string]]]]])
 
@@ -563,9 +557,9 @@
 
 (defn store-migrations!
   "Writes entities migrations code into files in .edn format"
-  [{:keys [^Connection database entities ^Clock clock path-pattern path-params]
+  [{:keys [^Connection database entity ^Clock clock path-pattern path-params]
     :or   {clock (Clock/systemUTC)}}]
-  (let [migrations (get-entity-migrations-map database entities)
+  (let [migrations (get-entity-migrations-map database entity)
         timestamp  (.millis clock)]
     (doseq [[entity migration] migrations]
       (let [filename (interpolate (or path-pattern default-path-pattern)
@@ -579,7 +573,7 @@
 (m/=> store-migrations!
   [:=> [:cat [:map
               [:database connection?]
-              [:entities [:set fx.entity/entity?]]
+              [:entity fx.entity/entity?]
               [:clock {:optional true} clock?]
               [:path-pattern {:optional true} :string]
               [:path-params {:optional true} [:map-of :keyword :any]]]]
@@ -589,43 +583,15 @@
 (defn validate-schema!
   "Compares DB schema with entities specs.
    Returns true if there's no changes false otherwise"
-  [{:keys [^Connection database entities]}]
-  (->> entities
-       (some (fn [{:keys [table] :as entity}]
-               (and (table-exist? database table)
-                    (let [db-columns     (get-db-columns database table)
-                          entity-columns (get-entity-columns entity)]
-                      (not (has-changes? db-columns entity-columns))))))
-       boolean))
+  [{:keys [^Connection database entity]}]
+  (let [table (fx.entity/prop entity :table)]
+    (and (table-exist? database table)
+         (let [db-columns     (get-db-columns database table)
+               entity-columns (get-entity-columns entity)]
+           (not (has-changes? db-columns entity-columns))))))
 
 (m/=> validate-schema!
   [:=> [:cat [:map
               [:database connection?]
-              [:entities [:set fx.entity/entity?]]]]
+              [:entity fx.entity/entity?]]]
    :boolean])
-
-
-;; =============================================================================
-;; Duct integration
-;; =============================================================================
-
-(defmethod ig/prep-key :fx/migrate [_ config]
-  (merge {:strategy :none}
-         config
-         {:database (ig/ref :fx.database/connection)
-          :entities (ig/refset :fx/entity)}))
-
-
-(defmethod ig/init-key :fx/migrate [_ {:keys [strategy] :as config}]
-  (let [migration-result
-        (case strategy
-          (:update :update-drop) (apply-migrations! config)
-          :store (store-migrations! config)
-          :validate (validate-schema! config)
-          nil)]
-    (merge config migration-result)))
-
-
-(defmethod ig/halt-key! :fx/migrate [_ {:keys [^Connection database strategy rollback-migrations]}]
-  (when (= strategy :update-drop)
-    (drop-migrations! database rollback-migrations)))

@@ -1,4 +1,5 @@
-(ns fx.module.stub-functions)
+(ns fx.module.stub-functions
+  (:require [integrant.core :as ig]))
 
 
 ;; add meta to symbol
@@ -45,3 +46,22 @@
   [^:fx.module.stub-functions/db-connection db-connection]
   {:status     :fail
    :connection (db-connection)})
+
+
+(defmethod ig/init-key :fx.module.stub-functions/test-1 [_ config]
+  (:component config))
+
+
+(defmethod ig/init-key :fx.module.stub-functions/test-2 [_ config]
+  (:component config))
+
+
+(def ^{:fx/autowire :fx.module.stub-functions/test-1}
+  parent-test-component
+  {:component :test-1})
+
+
+(def ^{:fx/autowire [:fx.module.stub-functions/test-1
+                     :fx.module.stub-functions/test-2]}
+  multi-parent-test-component
+  {:component [:test-1 :test-2]})

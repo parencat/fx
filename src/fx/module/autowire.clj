@@ -143,9 +143,19 @@
       config
       (assoc config comp-key params-config))))
 
+(def composite-integrant-key
+  [:vector {:min 2 :max 2} :qualified-keyword])
+
 (m/=> prep-component
   [:=> [:cat :map :qualified-keyword :any]
-   [:map-of :qualified-keyword [:map-of :keyword ig-ref]]])
+   [:map-of
+    [:or :qualified-keyword composite-integrant-key]
+    [:or [:map-of :keyword ig-ref] :any]]])
+
+
+(defn vector-of-keywords? [parent]
+  (and (vector? parent)
+       (every? keyword? parent)))
 
 
 (defn prep-components-config
@@ -156,14 +166,19 @@
    (fn [config comp-key comp-value]
      (let [comp-meta (meta comp-value)
            parent    (get comp-meta AUTOWIRED-KEY)]
-       (if (keyword? parent)
-         ;; child components doesn't require additional processing
+       ;; child components doesn't require additional processing
+       (cond
+         (keyword? parent)
          (assoc config [parent comp-key] (deref comp-value))
+
+         (vector-of-keywords? parent)
+         (->> parent
+              (map #(vector [% comp-key] (deref comp-value)))
+              (into config))
+
+         :else
          (prep-component config comp-key comp-value))))
    {} components))
-
-(def composite-integrant-key
-  [:vector {:min 2 :max 2} :qualified-keyword])
 
 (m/=> prep-components-config
   [:=> [:cat [:map-of :qualified-keyword :any]]

@@ -64,8 +64,10 @@
 (defn simple-func [num]
   (+ num num))
 
+
 (def simple-val
   [1 2 3])
+
 
 (deftest get-comp-deps-test
   (testing "returns empty collection if no metadata set on function"
@@ -145,5 +147,29 @@
             (is (= {:status     :ok
                     :connection {:connected :ok}}
                    (status-handler)))))))
+
+    (ig/halt! system)))
+
+
+(deftest autowire-parent-components
+  (let [config (duct/prep-config valid-config)
+        system (ig/init config)]
+
+    (testing "single parent component"
+      (is (= (->> [:fx.module.stub-functions/test-1 :fx.module.stub-functions/parent-test-component]
+                  (get config)
+                  :component)
+             :test-1)))
+
+    (testing "multi parent component"
+      (is (= (->> [:fx.module.stub-functions/test-2 :fx.module.stub-functions/multi-parent-test-component]
+                  (get config)
+                  :component)
+             [:test-1 :test-2]))
+
+      (is (= (->> [:fx.module.stub-functions/test-2 :fx.module.stub-functions/multi-parent-test-component]
+                  (get config)
+                  :component)
+             [:test-1 :test-2])))
 
     (ig/halt! system)))

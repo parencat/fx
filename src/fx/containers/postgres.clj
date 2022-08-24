@@ -42,8 +42,7 @@
        {:fx.database/connection {:url      (.getJdbcUrl (:container container))
                                  :user     (.getUsername (:container container))
                                  :password (.getPassword (:container container))}
-        :fx.containers/postgres {:container container}
-        :fx/migrate             {:postgres (ig/ref :fx.containers/postgres)}}))))
+        :fx.containers/postgres {:container container}}))))
 
 
 ;; test helper macro
