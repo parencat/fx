@@ -16,13 +16,14 @@
 (def invalid-config
   {:duct.profile/base
    {:duct.core/project-ns   'test
-    :fx.containers/postgres {:port 5432}
     :fx.database/connection {}}})
 
 
 (deftest database-bad-config-test
   (is (thrown? Exception
-               (duct/prep-config invalid-config))))
+               (-> invalid-config
+                   (duct/prep-config)
+                   (ig/init)))))
 
 
 (deftest database-url-config-test

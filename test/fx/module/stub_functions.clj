@@ -48,20 +48,10 @@
    :connection (db-connection)})
 
 
-(defmethod ig/init-key :fx.module.stub-functions/test-1 [_ config]
+(defmethod ig/init-key :fx.module.stub-functions/test [_ config]
   (:component config))
 
 
-(defmethod ig/init-key :fx.module.stub-functions/test-2 [_ config]
-  (:component config))
-
-
-(def ^{:fx/autowire :fx.module.stub-functions/test-1}
+(def ^{:fx/autowire :fx.module.stub-functions/test}
   parent-test-component
-  {:component :test-1})
-
-
-(def ^{:fx/autowire [:fx.module.stub-functions/test-1
-                     :fx.module.stub-functions/test-2]}
-  multi-parent-test-component
-  {:component [:test-1 :test-2]})
+  {:component :test})

@@ -156,20 +156,9 @@
         system (ig/init config)]
 
     (testing "single parent component"
-      (is (= (->> [:fx.module.stub-functions/test-1 :fx.module.stub-functions/parent-test-component]
+      (is (= (->> [:fx.module.stub-functions/test :fx.module.stub-functions/parent-test-component]
                   (get config)
                   :component)
-             :test-1)))
-
-    (testing "multi parent component"
-      (is (= (->> [:fx.module.stub-functions/test-2 :fx.module.stub-functions/multi-parent-test-component]
-                  (get config)
-                  :component)
-             [:test-1 :test-2]))
-
-      (is (= (->> [:fx.module.stub-functions/test-2 :fx.module.stub-functions/multi-parent-test-component]
-                  (get config)
-                  :component)
-             [:test-1 :test-2])))
+             :test)))
 
     (ig/halt! system)))
