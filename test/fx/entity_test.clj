@@ -4,7 +4,7 @@
    [duct.core :as duct]
    [integrant.core :as ig]
    [malli.instrument :as mi]
-   [fx.entity :as fx.entity])
+   [fx.entity])
   (:import
    [fx.entity Entity]))
 

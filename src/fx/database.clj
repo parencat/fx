@@ -8,8 +8,7 @@
    [java.sql Connection]))
 
 
-(defmethod ig/prep-key :fx.database/connection [_ {:keys [url user password
-                                                          dbtype host dbname port]}]
+(defn get-db-spec [{:keys [url user password dbtype host dbname port]}]
   (let [jdbc-url (or url
                      (System/getenv "DATABASE_URL")
                      (try (jdbc.conn/jdbc-url {:dbtype dbtype :dbname dbname :host host :port port})
@@ -25,9 +24,11 @@
                       {:component :fx.database/connection})))))
 
 
-(defmethod ig/init-key :fx.database/connection [_ connection-params]
-  ;; TODO use connection pool
-  (jdbc/get-connection connection-params))
+
+(defmethod ig/init-key :fx.database/connection [_ config]
+  (let [spec (get-db-spec config)]
+    ;; TODO use connection pool
+    (jdbc/get-connection spec)))
 
 
 (defmethod ig/halt-key! :fx.database/connection [_ ^Connection connection]

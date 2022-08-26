@@ -23,7 +23,8 @@
   (tc/stop! container))
 
 
-(defmethod ig/init-key :fx.containers/postgres [_ {:keys [port container]}]
+(defmethod ig/init-key :fx.containers/postgres [_ {:keys [port container]
+                                                   :or   {port 5432}}]
   (if (some? container)
     container
     (pg-container {:port port})))
@@ -41,7 +42,8 @@
        config
        {:fx.database/connection {:url      (.getJdbcUrl (:container container))
                                  :user     (.getUsername (:container container))
-                                 :password (.getPassword (:container container))}
+                                 :password (.getPassword (:container container))
+                                 :postgres (ig/ref :fx.containers/postgres)}
         :fx.containers/postgres {:container container}}))))
 
 

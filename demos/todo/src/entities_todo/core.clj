@@ -39,9 +39,9 @@
   [^::person person {:strs [name email]}]
   {:status  200
    :headers {"Content-Type" "application/json"}
-   :body    (ent/create! person {:id    (random-uuid)
-                                 :name  name
-                                 :email email})})
+   :body    (repo/save! person {:id    (random-uuid)
+                                :name  name
+                                :email email})})
 
 
 (defn routes

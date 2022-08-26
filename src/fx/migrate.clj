@@ -422,12 +422,12 @@
   "According to dependencies between entities will sort them in the topological order"
   [entities]
   (let [graph (atom (dep/graph))
-        emap  (into {} (map (fn [e] [(:entity e) e])) entities)]
+        emap  (into {} (map (fn [e] [(:type e) e])) entities)]
     ;; build the graph
     (doseq [e1 entities e2 entities]
-      (if (fx.entity/depends-on? (:entity e1) (:entity e2))
-        (reset! graph (dep/depend @graph (:entity e1) (:entity e2)))
-        (reset! graph (dep/depend @graph (:entity e1) nil))))
+      (if (fx.entity/depends-on? e1 e2)
+        (reset! graph (dep/depend @graph (:type e1) (:type e2)))
+        (reset! graph (dep/depend @graph (:type e1) nil))))
     ;; graph -> sorted list
     (->> @graph
          (dep/topo-sort)
@@ -455,25 +455,31 @@
 (defn get-all-migrations
   "Returns a two-dimensional vector of migration strings for all changed entities.
    For each entity will be two items 'SQL to apply changes' followed with 'SQL to drop changes'"
-  [^Connection database entity]
-  (entity->migration database [] entity))
+  [^Connection database entities]
+  (let [sorted-entities (sort-by-dependencies entities)]
+    (reduce (fn [migrations entity]
+              (entity->migration database migrations entity))
+            [] sorted-entities)))
 
 (m/=> get-all-migrations
-  [:=> [:cat connection? fx.entity/entity?]
+  [:=> [:cat connection? [:set fx.entity/entity?]]
    [:vector [:vector :string]]])
 
 
 (defn get-entity-migrations-map
   "Returns a map of shape {:entity/name {:up 'SQL to apply changes' :down 'SQL to drop changes'}}"
-  [^Connection database entity]
-  (let [migration (entity->migration database [] entity)]
-    (if (seq migration)
-      {(:type entity) {:up   (first migration)
-                       :down (second migration)}}
-      {})))
+  [^Connection database entities]
+  (let [sorted-entities (sort-by-dependencies entities)]
+    (reduce (fn [migrations-map entity]
+              (let [migration (entity->migration database [] entity)]
+                (if (seq migration)
+                  (assoc migrations-map (:type entity) {:up   (first migration)
+                                                        :down (second migration)})
+                  migrations-map)))
+            {} sorted-entities)))
 
 (m/=> get-entity-migrations-map
-  [:=> [:cat connection? fx.entity/entity?]
+  [:=> [:cat connection? [:set fx.entity/entity?]]
    [:map-of :qualified-keyword [:map
                                 [:up [:vector :string]]
                                 [:down [:vector :string]]]]])
@@ -481,14 +487,14 @@
 
 (defn prep-migrations
   "Generates migrations for all entities in the system (forward and backward)"
-  [^Connection database entity]
-  (let [all-migrations (get-all-migrations database entity)
+  [^Connection database entities]
+  (let [all-migrations (get-all-migrations database entities)
         [migrations rollback-migrations] (unzip all-migrations)]
     {:migrations          migrations
      :rollback-migrations (-> rollback-migrations reverse vec)}))
 
 (m/=> prep-migrations
-  [:=> [:cat connection? fx.entity/entity?]
+  [:=> [:cat connection? [:set fx.entity/entity?]]
    [:map
     [:migrations [:vector [:vector :string]]]
     [:rollback-migrations [:vector [:vector :string]]]]])
@@ -501,8 +507,8 @@
 (defn apply-migrations!
   "Generates and applies migrations related to entities on database
    All migrations run in a single transaction"
-  [{:keys [^Connection database entity]}]
-  (let [{:keys [migrations rollback-migrations]} (prep-migrations database entity)]
+  [{:keys [^Connection database entities]}]
+  (let [{:keys [migrations rollback-migrations]} (prep-migrations database entities)]
     (jdbc/with-transaction [tx database]
       (doseq [migration migrations]
         (println "Running migration" migration)
@@ -512,7 +518,7 @@
 (m/=> apply-migrations!
   [:=> [:cat [:map
               [:database connection?]
-              [:entity fx.entity/entity?]]]
+              [:entities [:set fx.entity/entity?]]]]
    [:map
     [:rollback-migrations [:vector [:vector :string]]]]])
 
@@ -557,9 +563,9 @@
 
 (defn store-migrations!
   "Writes entities migrations code into files in .edn format"
-  [{:keys [^Connection database entity ^Clock clock path-pattern path-params]
+  [{:keys [^Connection database entities ^Clock clock path-pattern path-params]
     :or   {clock (Clock/systemUTC)}}]
-  (let [migrations (get-entity-migrations-map database entity)
+  (let [migrations (get-entity-migrations-map database entities)
         timestamp  (.millis clock)]
     (doseq [[entity migration] migrations]
       (let [filename (interpolate (or path-pattern default-path-pattern)
@@ -573,7 +579,7 @@
 (m/=> store-migrations!
   [:=> [:cat [:map
               [:database connection?]
-              [:entity fx.entity/entity?]
+              [:entities [:set fx.entity/entity?]]
               [:clock {:optional true} clock?]
               [:path-pattern {:optional true} :string]
               [:path-params {:optional true} [:map-of :keyword :any]]]]
@@ -583,15 +589,18 @@
 (defn validate-schema!
   "Compares DB schema with entities specs.
    Returns true if there's no changes false otherwise"
-  [{:keys [^Connection database entity]}]
-  (let [table (fx.entity/prop entity :table)]
-    (and (table-exist? database table)
-         (let [db-columns     (get-db-columns database table)
-               entity-columns (get-entity-columns entity)]
-           (not (has-changes? db-columns entity-columns))))))
+  [{:keys [^Connection database entities]}]
+  (->> entities
+       (some (fn [entity]
+               (let [table (fx.entity/prop entity :table)]
+                 (and (table-exist? database table)
+                      (let [db-columns     (get-db-columns database table)
+                            entity-columns (get-entity-columns entity)]
+                        (not (has-changes? db-columns entity-columns)))))))
+       boolean))
 
 (m/=> validate-schema!
   [:=> [:cat [:map
               [:database connection?]
-              [:entity fx.entity/entity?]]]
+              [:entities [:set fx.entity/entity?]]]]
    :boolean])

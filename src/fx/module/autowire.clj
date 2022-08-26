@@ -153,11 +153,6 @@
     [:or [:map-of :keyword ig-ref] :any]]])
 
 
-(defn vector-of-keywords? [parent]
-  (and (vector? parent)
-       (every? keyword? parent)))
-
-
 (defn prep-components-config
   "Given a list of system components will create an integrant key for each of them.
    Returns integrant style config map for given components."
@@ -167,16 +162,8 @@
      (let [comp-meta (meta comp-value)
            parent    (get comp-meta AUTOWIRED-KEY)]
        ;; child components doesn't require additional processing
-       (cond
-         (keyword? parent)
+       (if (keyword? parent)
          (assoc config [parent comp-key] (deref comp-value))
-
-         (vector-of-keywords? parent)
-         (->> parent
-              (map #(vector [% comp-key] (deref comp-value)))
-              (into config))
-
-         :else
          (prep-component config comp-key comp-value))))
    {} components))
 

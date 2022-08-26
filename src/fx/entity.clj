@@ -237,9 +237,8 @@
 (defn entity-columns
   "Return a list of entity fields names (keywords)"
   [entity]
-  (let [entity-type (:type entity)]
-    (->> (entity-fields entity-type)
-         (mapv key))))
+  (->> (entity-fields entity)
+       (mapv key)))
 
 (m/=> entity-columns
   [:=> [:cat entity?]
@@ -251,8 +250,7 @@
    map -> table e.g.
    {:id 1 :name 'Jack'} -> [1 'Jack']"
   [entity data]
-  (let [entity-type      (:type entity)
-        columns          (entity-columns entity-type)
+  (let [columns          (entity-columns entity)
         get-columns-vals (apply juxt columns)]
     (get-columns-vals data)))
 
@@ -416,16 +414,12 @@
 
 (defn create-entity
   "Constructor function for entities"
-  [entity-type config]
-  (let [{:keys [spec]} config]
-    (register-entity! entity-type spec)
-    (->Entity entity-type)))
+  [entity-type spec]
+  (register-entity! entity-type spec)
+  (->Entity entity-type))
 
 (m/=> create-entity
-  [:=> [:cat
-        :qualified-keyword
-        [:map
-         [:spec entity-spec?]]]
+  [:=> [:cat :qualified-keyword entity-spec?]
    entity?])
 
 
@@ -448,6 +442,6 @@
               deps))))
 
 
-(defmethod ig/init-key :fx/entity [entity-key config]
+(defmethod ig/init-key :fx/entity [entity-key {:keys [spec]}]
   (let [entity-type (uc/entity-key->entity-type entity-key)]
-    (create-entity entity-type config)))
+    (create-entity entity-type spec)))
