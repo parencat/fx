@@ -234,6 +234,21 @@
    [:sequential entity-field-schema?]])
 
 
+(defn entity-field
+  "Return a field spec (map-entries)"
+  [entity field-key]
+  (let [entity-type (:type entity)
+        schema      (mr/schema entities-registry entity-type)]
+    (->> (m/entries schema {:registry entities-registry})
+         (filter (fn [entry]
+                   (= (key entry) field-key)))
+         first)))
+
+(m/=> entity-field
+  [:=> [:cat entity? :keyword]
+   [:maybe entity-field-schema?]])
+
+
 (defn entity-columns
   "Return a list of entity fields names (keywords)"
   [entity]
@@ -334,8 +349,15 @@
     [:props [:maybe map?]]]])
 
 
+(defn field-prop [entity field-key prop-key]
+  (some-> (entity-field entity field-key)
+          val
+          (m/properties {:registry entities-registry})
+          (get prop-key)))
+
+
 (defn ref-field-prop
-  "Get any property value from field spec"
+  "Get any property value from referenced field spec"
   [field-schema prop-key]
   (when-let [schema (some-> field-schema m/children first)]
     (let [deps-schema (some->> (m/properties schema)

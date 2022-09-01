@@ -10,7 +10,6 @@
    [medley.core :as mdl]
    [clojure.java.io :as io])
   (:import
-   [java.sql Connection]
    [java.time Clock Instant ZoneOffset]))
 
 
@@ -100,36 +99,42 @@
 
 
 (deftest prep-changes-test
-  (testing "column added"
-    (is (= (sut/prep-changes {:id {:type :uuid}}
-                             {:id   {:type :uuid}
-                              :name {:type :string}})
-           {:rollbacks '({:drop-column :name})
-            :updates   '({:add-column [:name :string [:not nil]]})})))
+  (let [user-spec (-> user-schema entity/prepare-spec :spec)
+        user      (entity/create-entity :some/test-user user-spec)]
+    (testing "column added"
+      (is (= (sut/prep-changes user
+                               {:id {:type :uuid}}
+                               {:id   {:type :uuid}
+                                :name {:type :string}})
+             {:rollbacks '({:drop-column :name})
+              :updates   '({:add-column [:name :string [:not nil]]})})))
 
-  (testing "column deleted"
-    (is (= (sut/prep-changes {:id   {:type :uuid}
-                              :name {:type :string}}
-                             {:id {:type :uuid}})
-           {:rollbacks '({:add-column [:name :string [:not nil]]})
-            :updates   '({:drop-column :name})})))
+    (testing "column deleted"
+      (is (= (sut/prep-changes user
+                               {:id   {:type :uuid}
+                                :name {:type :string}}
+                               {:id {:type :uuid}})
+             {:rollbacks '({:add-column [:name :string [:not nil]]})
+              :updates   '({:drop-column :name})})))
 
-  (testing "column modified"
-    (is (= (sut/prep-changes {:id {:type :uuid :optional true}}
-                             {:id {:type :string :primary-key? true}})
-           {:rollbacks '({:drop-index [:primary-key :id]}
-                         {:alter-column [:id :type :uuid]}
-                         {:alter-column [:id :set [:not nil]]})
-            :updates   '({:alter-column [:id :type :string]}
-                         {:add-index [:primary-key :id]}
-                         {:alter-column [:id :drop [:not nil]]})})))
+    (testing "column modified"
+      (is (= (sut/prep-changes user
+                               {:id {:type :uuid :optional true}}
+                               {:id {:type :string :primary-key? true}})
+             {:rollbacks '({:drop-index [:primary-key :id]}
+                           {:alter-column [:id :type :uuid]}
+                           {:alter-column [:id :set [:not nil]]})
+              :updates   '({:alter-column [:id :type :string]}
+                           {:add-index [:primary-key :id]}
+                           {:alter-column [:id :drop [:not nil]]})})))
 
-  (testing "tables identical"
-    (let [{:keys [rollbacks updates]}
-          (sut/prep-changes {:id {:type :uuid}}
-                            {:id {:type :uuid}})]
-      (is (empty? updates)
-          (empty? rollbacks)))))
+    (testing "tables identical"
+      (let [{:keys [rollbacks updates]}
+            (sut/prep-changes user
+                              {:id {:type :uuid}}
+                              {:id {:type :uuid}})]
+        (is (empty? updates)
+            (empty? rollbacks))))))
 
 
 (deftest apply-migrations-test
@@ -248,3 +253,22 @@
     ["${name}" {:name "John"}] "John"
     ["/${host}:${port}/path" {:host "www.test.com" :port 8080}] "/www.test.com:8080/path"
     ["resources/${folder}/${name}.edn" {:folder "migrations" :name "user"}] "resources/migrations/user.edn"))
+
+
+
+(def entity-w-wrapped-fields
+  [:spec {:table "user"}
+   [:id {:primary-key? true} uuid?]
+   [:column {:wrap? true} [:string {:max 250}]]])
+
+
+(deftest wrapped-fields-test
+  (testing "wrapped fields returned as raw honey sql operator"
+    (let [user-spec (-> entity-w-wrapped-fields entity/prepare-spec :spec)
+          user      (entity/create-entity :wrapped/user user-spec)]
+      (is (= (sut/prep-changes user
+                               {:id {:type :uuid}}
+                               {:id     {:type :uuid}
+                                :column {:type [:string 250]}})
+             {:rollbacks '({:drop-column [:raw ["\"" "column" "\""]]})
+              :updates   '({:add-column [[:raw ["\"" "column" "\""]] [:string 250] [:not nil]]})})))))

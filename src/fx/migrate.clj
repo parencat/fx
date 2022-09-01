@@ -1,6 +1,5 @@
 (ns fx.migrate
   (:require
-   [integrant.core :as ig]
    [clojure.string :as str]
    [clojure.set]
    [clojure.core.match :refer [match]]
@@ -25,6 +24,22 @@
 ;; =============================================================================
 
 (declare schema->column-type)
+
+
+(def table-field-constraints
+  [:map
+   [:optional {:optional true} :boolean]
+   [:primary-key? {:optional true} :boolean]
+   [:foreign-key? {:optional true} :string]])
+
+(def table-field
+  (mu/merge
+   [:map
+    [:type [:or :keyword [:tuple :keyword :int]]]]
+   table-field-constraints))
+
+(def table-fields
+  [:map-of :keyword table-field])
 
 
 (defn get-ref-type
@@ -81,19 +96,18 @@
    [:vector vector?]])
 
 
-(defn entity->columns-ddl
-  "Converts entity spec to a list of HoneySQL vectors representing individual fields
-   e.g. [[:id :uuid [:not nil] [:primary-key]] ...]"
-  [entity]
-  (->> (fx.entity/entity-fields entity)
-       (mapv (fn [[key schema]]
-               (-> [key (-> schema fx.entity/field-schema schema->column-type)]
-                   (concat (schema->column-modifiers schema))
-                   vec)))))
+(defn ->column-name [entity field-name]
+  (if (fx.entity/field-prop entity field-name :wrap?)
+    [:raw ["\"" (name field-name) "\""]]
+    field-name))
 
-(m/=> entity->columns-ddl
-  [:=> [:cat fx.entity/entity?]
-   [:vector vector?]])
+(def column-name?
+  [:or :keyword
+   [:tuple [:= :raw] [:vector :string]]])
+
+(m/=> ->column-name
+  [:=> [:cat fx.entity/entity? :keyword]
+   column-name?])
 
 
 (defn schema->constraints-map
@@ -126,7 +140,7 @@
 
 (m/=> get-entity-columns
   [:=> [:cat fx.entity/entity?]
-   [:map-of :keyword :map]])
+   table-fields])
 
 
 ;; =============================================================================
@@ -192,19 +206,13 @@
           (some? fkcolumn-name) (assoc :foreign-key? pktable-name)))
 ;;(:cascade? props) (assoc :cascade? true)))
 
-(def table-field-constraints
-  [:map
-   [:optional {:optional true} :boolean]
-   [:primary-key? {:optional true} :boolean]
-   [:foreign-key? {:optional true} :string]])
-
 (m/=> column->constraints-map
   [:=> [:cat raw-table-field]
    table-field-constraints])
 
 
 (def default-column-size
-  2147483647)
+  2147483647)       ;; Not very reliable number
 
 
 (defn get-db-columns
@@ -225,15 +233,6 @@
          [key column]))
      columns)))
 
-(def table-field
-  (mu/merge
-   [:map
-    [:type [:or :keyword [:tuple :keyword :int]]]]
-   table-field-constraints))
-
-(def table-fields
-  [:map-of :keyword table-field])
-
 (m/=> get-db-columns
   [:=> [:cat connection? :string]
    table-fields])
@@ -247,6 +246,22 @@
 (sql/register-clause! :alter-column :modify-column :modify-column)
 (sql/register-clause! :add-constraint :modify-column :modify-column)
 (sql/register-clause! :drop-constraint :modify-column :modify-column)
+
+
+(defn entity->columns-ddl
+  "Converts entity spec to a list of HoneySQL vectors representing individual fields
+   e.g. [[:id :uuid [:not nil] [:primary-key]] ...]"
+  [entity]
+  (->> (fx.entity/entity-fields entity)
+       (mapv (fn [[field-key schema]]
+               (let [column-name (->column-name entity field-key)]
+                 (-> [column-name (-> schema fx.entity/field-schema schema->column-type)]
+                     (concat (schema->column-modifiers schema))
+                     vec))))))
+
+(m/=> entity->columns-ddl
+  [:=> [:cat fx.entity/entity?]
+   [:vector vector?]])
 
 
 (defn create-table-ddl
@@ -286,52 +301,72 @@
 
 (defn ->set-ddl
   "Converts table fields to the list of HoneySQL alter clauses"
-  [columns]
+  [entity columns]
   (->
-   (for [[column-name column] columns]
-     (for [[op value] column]
-       (match [op value]
-         [:type _] {:alter-column [column-name :type value]}
-         [:optional true] {:alter-column [column-name :set [:not nil]]}
-         [:optional false] {:alter-column [column-name :drop [:not nil]]}
-         [:primary-key? true] {:add-index [:primary-key column-name]}
-         [:primary-key? false] {:drop-index [:primary-key column-name]}
-         [:foreign-key? ref] {:add-constraint [(str (name column-name) "-fk") [:foreign-key] [:references ref]]}
-         [:foreign-key? false] {:drop-constraint [(str (name column-name) "-fk")]})))
+   (for [[column column-spec] columns]
+     (let [column-name (->column-name entity column)]
+       (for [[op value] column-spec]
+         (match [op value]
+           [:type _] {:alter-column [column-name :type value]}
+           [:optional true] {:alter-column [column-name :set [:not nil]]}
+           [:optional false] {:alter-column [column-name :drop [:not nil]]}
+           [:primary-key? true] {:add-index [:primary-key column-name]}
+           [:primary-key? false] {:drop-index [:primary-key column-name]}
+           [:foreign-key? ref] {:add-constraint [(str (name column) "-fk") [:foreign-key] [:references ref]]}
+           [:foreign-key? false] {:drop-constraint [(str (name column) "-fk")]}))))
    flatten))
+
+(m/=> ->set-ddl
+  [:=> [:cat fx.entity/entity? [:map-of :keyword map?]]
+   [:sequential map?]])
 
 
 (defn ->constraints-drop-ddl
   "Converts table fields to the list of HoneySQL drop clauses"
-  [columns]
+  [entity columns]
   (->
-   (for [[column-name column] columns]
-     (for [[op value] column]
-       (match [op value]
-         [:optional 0] {:alter-column [column-name :drop [:not nil]]}
-         [:primary-key? 0] {:drop-index [:primary-key column-name]}
-         [:foreign-key? 0] {:drop-constraint [(str (name column-name) "-fk")]})))
+   (for [[column column-spec] columns]
+     (let [column-name (->column-name entity column)]
+       (for [[op value] column-spec]
+         (match [op value]
+           [:optional 0] {:alter-column [column-name :drop [:not nil]]}
+           [:primary-key? 0] {:drop-index [:primary-key column-name]}
+           [:foreign-key? 0] {:drop-constraint [(str (name column) "-fk")]}))))
    flatten))
 
+(m/=> ->constraints-drop-ddl
+  [:=> [:cat fx.entity/entity? [:map-of :keyword map?]]
+   [:sequential map?]])
 
-(defn ->add-ddl [all-columns cols-to-add]
+
+(defn ->add-ddl [entity all-columns cols-to-add]
   (mapv (fn [col-name]
           (let [column (get all-columns col-name)]
             (->> (column->modifiers column)
-                 (into [col-name (:type column)])
+                 (into [(->column-name entity col-name) (:type column)])
                  (hash-map :add-column))))
         cols-to-add))
 
+(m/=> ->add-ddl
+  [:=> [:cat fx.entity/entity? table-fields [:set :keyword]]
+   [:vector
+    [:map [:add-column vector?]]]])
 
-(defn ->drop-ddl [cols-to-delete]
-  (mapv #(hash-map :drop-column %)
+
+(defn ->drop-ddl [entity cols-to-delete]
+  (mapv #(hash-map :drop-column (->column-name entity %))
         cols-to-delete))
+
+(m/=> ->drop-ddl
+  [:=> [:cat fx.entity/entity? [:set :keyword]]
+   [:vector
+    [:map [:drop-column column-name?]]]])
 
 
 (defn prep-changes
   "Given the simplified existing and updated fields definition
    will return a set of HoneySQL clauses to eliminate the difference"
-  [db-columns entity-columns]
+  [entity db-columns entity-columns]
   (let [entity-fields  (-> entity-columns keys set)
         db-fields      (-> db-columns keys set)
         cols-to-add    (clojure.set/difference entity-fields db-fields)
@@ -341,17 +376,17 @@
                                              (select-keys entity-columns common-cols))
         [rb-alterations rb-deletions] (differ/diff (select-keys entity-columns common-cols)
                                                    (select-keys db-columns common-cols))]
-    {:updates   (concat (->drop-ddl cols-to-delete)
-                        (->add-ddl entity-columns cols-to-add)
-                        (->set-ddl alterations)
-                        (->constraints-drop-ddl deletions))
-     :rollbacks (concat (->drop-ddl cols-to-add)
-                        (->constraints-drop-ddl rb-deletions)
-                        (->add-ddl db-columns cols-to-delete)
-                        (->set-ddl rb-alterations))}))
+    {:updates   (concat (->drop-ddl entity cols-to-delete)
+                        (->add-ddl entity entity-columns cols-to-add)
+                        (->set-ddl entity alterations)
+                        (->constraints-drop-ddl entity deletions))
+     :rollbacks (concat (->drop-ddl entity cols-to-add)
+                        (->constraints-drop-ddl entity rb-deletions)
+                        (->add-ddl entity db-columns cols-to-delete)
+                        (->set-ddl entity rb-alterations))}))
 
 (m/=> prep-changes
-  [:=> [:cat table-fields [:map-of :keyword :map]]
+  [:=> [:cat fx.entity/entity? table-fields table-fields]
    [:map
     [:updates [:sequential map?]]
     [:rollbacks [:sequential map?]]]])
@@ -370,7 +405,7 @@
               (empty? deletions)))))
 
 (m/=> has-changes?
-  [:=> [:cat table-fields [:map-of :keyword :map]]
+  [:=> [:cat table-fields table-fields]
    :boolean])
 
 
@@ -392,7 +427,7 @@
   [database entity table migrations]
   (let [db-columns     (get-db-columns database table)
         entity-columns (get-entity-columns entity)
-        {:keys [updates rollbacks]} (prep-changes db-columns entity-columns)]
+        {:keys [updates rollbacks]} (prep-changes entity db-columns entity-columns)]
     (if (some? updates)
       (let [updates   (alter-table-ddl table updates)
             rollbacks (alter-table-ddl table rollbacks)]

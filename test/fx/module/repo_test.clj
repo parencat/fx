@@ -14,7 +14,8 @@
 (def ^{:fx/autowire :fx/entity} person
   [:spec {:table "person"}
    [:id {:primary-key? true} :uuid]
-   [:name :string]])
+   [:name :string]
+   [:column {:wrap? true} :string]])
 
 
 (def config
@@ -29,19 +30,20 @@
         system (ig/init config)]
 
     (testing "repo module initialized all sub components"
-      (is (contains? system :fx.repo/migrate))
-      (is (contains? system :fx.repo/table))
-      (is (contains? system :fx.repo/adapter)))
+      (is (not-empty (ig/find-derived-1 system :fx.repo/migrate)))
+      (is (not-empty (ig/find-derived-1 system :fx.repo/adapter))))
 
     (testing "entity extended by repo module"
       (let [person    (val (ig/find-derived-1 system ::person))
             person-id (random-uuid)]
-        (fx.repo/save! person {:id   person-id
-                               :name "Mighty Repo"})
+        (fx.repo/save! person {:id     person-id
+                               :column "base"
+                               :name   "Mighty Repo"})
 
         (is (= (fx.repo/find! person {:id person-id})
-               {:id   person-id
-                :name "Mighty Repo"}))))
+               {:id     person-id
+                :column "base"
+                :name   "Mighty Repo"}))))
 
     (ig/halt! system)))
 

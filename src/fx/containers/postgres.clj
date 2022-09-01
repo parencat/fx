@@ -78,4 +78,12 @@
 
  (stop pgc)
 
+ (jdbc/execute-one!
+  (jdbc/get-connection
+   {:jdbcUrl (format "%s&user=%s&password=%s"
+                     (.getJdbcUrl (:container pgc))
+                     (.getUsername (:container pgc))
+                     (.getPassword (:container pgc)))})
+  ["CREATE TABLE \"person\" (\"column\" VARCHAR NOT NULL, name VARCHAR NOT NULL, id UUID NOT NULL PRIMARY KEY)"])
+
  nil)
