@@ -270,5 +270,5 @@
                                {:id {:type :uuid}}
                                {:id     {:type :uuid}
                                 :column {:type [:string 250]}})
-             {:rollbacks '({:drop-column [:raw ["\"" "column" "\""]]})
-              :updates   '({:add-column [[:raw ["\"" "column" "\""]] [:string 250] [:not nil]]})})))))
+             {:rollbacks '({:drop-column [:quote :column]})
+              :updates   '({:add-column [[:quote :column] [:string 250] [:not nil]]})})))))

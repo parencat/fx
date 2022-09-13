@@ -7,6 +7,7 @@
    [next.jdbc.result-set :as rs]
    [fx.entity :as fx.entity]
    [honey.sql :as sql]
+   [fx.utils.honey]
    [weavejester.dependency :as dep]
    [medley.core :as mdl]
    [differ.core :as differ]
@@ -46,8 +47,8 @@
   "Given an entity name will find a primary key field and return its type.
    e.g. :my/user -> :uuid
    Type could be complex e.g. [:string 250]"
-  [entity]
-  (-> entity
+  [entity-key]
+  (-> entity-key
       fx.entity/ident-field-schema
       val
       fx.entity/field-schema
@@ -69,7 +70,7 @@
     [:string _] :varchar
     ['string? _] :varchar
 
-    [:entity-ref {:entity entity}] (get-ref-type entity)
+    [:entity-ref {:entity entity-key}] (get-ref-type entity-key)
 
     :else (throw (ex-info (str "Unknown type for column " type) {:type type}))))
 
@@ -98,12 +99,12 @@
 
 (defn ->column-name [entity field-name]
   (if (fx.entity/field-prop entity field-name :wrap?)
-    [:raw ["\"" (name field-name) "\""]]
+    [:quote field-name]
     field-name))
 
 (def column-name?
   [:or :keyword
-   [:tuple [:= :raw] [:vector :string]]])
+   [:tuple [:= :quote] :keyword]])
 
 (m/=> ->column-name
   [:=> [:cat fx.entity/entity? :keyword]
@@ -241,12 +242,6 @@
 ;; =============================================================================
 ;; Migration functions
 ;; =============================================================================
-
-;; Postgres doesn't support :modify-column clause
-(sql/register-clause! :alter-column :modify-column :modify-column)
-(sql/register-clause! :add-constraint :modify-column :modify-column)
-(sql/register-clause! :drop-constraint :modify-column :modify-column)
-
 
 (defn entity->columns-ddl
   "Converts entity spec to a list of HoneySQL vectors representing individual fields
