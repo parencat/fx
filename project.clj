@@ -16,9 +16,10 @@
                  [differ "0.3.3"]
                  [com.github.seancorfield/next.jdbc "1.2.796"]
                  [com.github.seancorfield/honeysql "2.3.911"]
-                 [org.postgresql/postgresql "42.3.6"]
+                 [org.postgresql/postgresql "42.5.0"]
                  [clj-test-containers "0.7.0"]
-                 [org.testcontainers/postgresql "1.17.3"]]
+                 [org.testcontainers/postgresql "1.17.3"]
+                 [com.cnuernber/charred "1.012"]]
 
   :profiles
   {:dev {:dependencies [[vvvvalvalval/scope-capture "0.3.3-s1"]]}}

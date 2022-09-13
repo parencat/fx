@@ -1,9 +1,12 @@
 (ns fx.entity
+  (:refer-clojure
+   :exclude [cast])
   (:require
    [integrant.core :as ig]
    [malli.core :as m]
    [malli.error :as me]
    [malli.registry :as mr]
+   [malli.transform :as mt]
    [medley.core :as mdl]
    [fx.utils.common :as uc])
   (:import
@@ -234,6 +237,19 @@
    [:sequential entity-field-schema?]])
 
 
+
+(defn entity-all-fields
+  "Return a list of entity fields specs (map-entries) including optional relations"
+  [entity]
+  (let [entity-type (:type entity)
+        schema      (mr/schema entities-registry entity-type)]
+    (m/entries schema {:registry entities-registry})))
+
+(m/=> entity-all-fields
+  [:=> [:cat entity?]
+   [:sequential entity-field-schema?]])
+
+
 (defn entity-field
   "Return a field spec (map-entries)"
   [entity field-key]
@@ -276,8 +292,8 @@
 
 (defn ref?
   "Check if type is a reference to another entity"
-  [schema]
-  (let [props (m/properties schema)]
+  [val-schema]
+  (let [props (-> val-schema m/children first m/properties)]
     (->> (:entity props)
          (mr/schema entities-registry)
          some?)))
@@ -290,16 +306,30 @@
 (defn ident-field-schema
   "Get the spec of a field which is marked as identity field"
   [entity]
-  (let [entity-type (:type entity)
-        schema      (mr/schema entities-registry entity-type)]
+  (let [schema (mr/schema entities-registry (or (:type entity) entity))]
     (->> (m/entries schema {:registry entities-registry})
          (filter (fn [[_ v]]
-                   (-> v m/properties :identity?)))
+                   (-> v m/properties :primary-key?))) ;; TODO change to the :identity? keyword
          first)))
 
 (m/=> ident-field-schema
-  [:=> [:cat entity?]
+  [:=> [:cat [:or entity? :qualified-keyword]]
    entity-field-schema?])
+
+
+(defn ref-field-schema
+  "Get the field schema which is a reference to the specifyed type"
+  [entity target-entity]
+  (let [schema (mr/schema entities-registry (or (:type entity) entity))]
+    (->> (m/entries schema {:registry entities-registry})
+         (filter (fn [[_ v]]
+                   (= (-> v m/children first m/properties :entity)
+                      (or (:type target-entity) target-entity))))
+         first)))
+
+(m/=> ref-field-schema
+  [:=> [:cat [:or entity? :qualified-keyword] [:or entity? :qualified-keyword]]
+   [:maybe entity-field-schema?]])
 
 
 (defn schema-type
@@ -372,6 +402,19 @@
    :any])
 
 
+(defn ref-type-prop
+  "Get any field type property value"
+  [field-schema prop-key]
+  (when-let [schema (some-> field-schema m/children first)]
+    (-> schema
+        (m/properties {:registry entities-registry})
+        (get prop-key))))
+
+(m/=> ref-type-prop
+  [:=> [:cat field-schema? :keyword]
+   :any])
+
+
 (defn depends-on?
   "Check if one entity depends on the other as foreign tables in SQL"
   [target dependency]
@@ -387,6 +430,19 @@
 (m/=> depends-on?
   [:=> [:cat entity? entity?]
    :boolean])
+
+
+(defn cast
+  "Cast data fields according to entity schema"
+  [entity data]
+  (let [schema (if (keyword? entity)
+                 (mr/schema entities-registry entity)
+                 (mr/schema entities-registry (:type entity)))]
+    (m/decode schema data {:registry entities-registry} mt/string-transformer)))
+
+(m/=> cast
+  [:=> [:cat [:or entity? :qualified-keyword] map?]
+   map?])
 
 
 ;; =============================================================================
