@@ -365,6 +365,29 @@
    map?])
 
 
+(defn pg-delete!
+  "Delete record from database"
+  [^Connection database entity {:keys [where] :as params}]
+  (let [table        (fx.entity/prop entity :table)
+        columns      (fx.entity/entity-columns entity)
+        eq-clauses   (some-> (select-keys params columns)
+                             (not-empty)
+                             (sql/map=))
+        where-clause (if (some? eq-clauses)
+                       [:and where eq-clauses]
+                       where)
+        query        (-> {:delete-from (keyword table)
+                          :where       where-clause}
+                         (sql/format {:quoted true}))]
+    (jdbc/execute-one! database query
+      {:return-keys true
+       :builder-fn  jdbc.rs/as-unqualified-kebab-maps})))
+
+(m/=> pg-delete!
+  [:=> [:cat connection? fx.entity/entity? [:map [:where {:optional true} vector?]]]
+   map?])
+
+
 (defn pg-find!
   "Get single record from the database"
   [^Connection database entity {:keys [fields where nested] :as params}]
@@ -459,6 +482,9 @@
 
     (update! [entity data params]
       (pg-update! database entity data params))
+
+    (delete! [entity params]
+      (pg-delete! database entity params))
 
     (find! [entity params]
       (pg-find! database entity params))

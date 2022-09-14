@@ -191,3 +191,25 @@
         (is (= "Already old post" (:title result)))))
 
     (ig/halt! system)))
+
+
+(deftest delete-test
+  (let [config (duct/prep-config config)
+        system (ig/init config)]
+
+    (let [post    (val (ig/find-derived-1 system ::post))
+          post-id (random-uuid)]
+
+      (fx.repo/save! post {:id    post-id
+                           :title "New post"})
+
+      (let [result (fx.repo/find! post {:id post-id})]
+        (is (= "New post" (:title result))))
+
+      (let [result (fx.repo/delete! post {:id post-id})]
+        (is (= "New post" (:title result))))
+
+      (let [result (fx.repo/find! post {:id post-id})]
+        (is (nil? result))))
+
+    (ig/halt! system)))
