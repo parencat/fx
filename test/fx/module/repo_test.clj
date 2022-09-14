@@ -119,7 +119,7 @@
       (fx.repo/save! post {:id    post-id
                            :title "Random post"})
       (fx.repo/save! user {:id   user-id
-                           :name "Randon user"
+                           :name "Random user"
                            :post post-id})
 
       (testing "get user with related post"
@@ -145,7 +145,7 @@
       (fx.repo/save! post {:id    post-id
                            :title "Random post"})
       (fx.repo/save! user {:id   user-id
-                           :name "Randon user"
+                           :name "Random user"
                            :post post-id})
 
       (testing "get all users"
@@ -167,5 +167,27 @@
               first-post (first result)]
           (is (= 2 (count (:users first-post))))
           (is (= #{user-id user2-id} (set (map :id (:users first-post))))))))
+
+    (ig/halt! system)))
+
+
+(deftest update-test
+  (let [config (duct/prep-config config)
+        system (ig/init config)]
+
+    (let [post    (val (ig/find-derived-1 system ::post))
+          post-id (random-uuid)]
+
+      (fx.repo/save! post {:id    post-id
+                           :title "New post"})
+
+      (let [result (fx.repo/find! post {:id post-id})]
+        (is (= "New post" (:title result))))
+
+      (let [result (fx.repo/update! post {:title "Already old post"} {:id post-id})]
+        (is (= "Already old post" (:title result))))
+
+      (let [result (fx.repo/find! post {:id post-id})]
+        (is (= "Already old post" (:title result)))))
 
     (ig/halt! system)))

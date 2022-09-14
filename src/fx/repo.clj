@@ -3,7 +3,7 @@
 
 (defprotocol IRepo
   (save! [entity data])
-  (update! [entity data options])
-  (delete! [entity options])
-  (find! [entity options])
-  (find-all! [entity] [entity options]))
+  (update! [entity data params])
+  (delete! [entity params])
+  (find! [entity params])
+  (find-all! [entity] [entity params]))
