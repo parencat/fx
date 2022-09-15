@@ -16,6 +16,7 @@
    [fx.utils.types :refer [connection? clock?]]
    [clojure.java.io :as io])
   (:import
+   [javax.sql DataSource]
    [java.sql DatabaseMetaData Connection]
    [java.time Clock]))
 
@@ -150,8 +151,9 @@
 
 (defn table-exist?
   "Checks if table exists in database"
-  [^Connection database table]
-  (let [^DatabaseMetaData metadata (.getMetaData database)
+  [^DataSource database table]
+  (let [^Connection conn           (jdbc/get-connection database)
+        ^DatabaseMetaData metadata (.getMetaData conn)
         ;; TODO pass a schema option as well as table
         tables                     (-> metadata
                                        (.getTables nil nil table nil))]
@@ -168,8 +170,9 @@
 
 (defn extract-db-columns
   "Returns all table fields metadata"
-  [^Connection database table]
-  (let [^DatabaseMetaData metadata (.getMetaData database)
+  [^DataSource database table]
+  (let [^Connection conn           (jdbc/get-connection database)
+        ^DatabaseMetaData metadata (.getMetaData conn)
         columns                    (-> metadata
                                        (.getColumns nil "public" table nil) ;; TODO expose schema as option to clients
                                        (rs/datafiable-result-set database {:builder-fn rs/as-unqualified-kebab-maps})
@@ -437,7 +440,7 @@
 (defn entity->migration
   "Given an entity will check if some updates were introduced
    If so will return a set of SQL migrations string"
-  [^Connection database migrations entity]
+  [^DataSource database migrations entity]
   (let [table (fx.entity/prop entity :table)]
     (if (not (table-exist? database table))
       (create-table entity table migrations)
@@ -485,7 +488,7 @@
 (defn get-all-migrations
   "Returns a two-dimensional vector of migration strings for all changed entities.
    For each entity will be two items 'SQL to apply changes' followed with 'SQL to drop changes'"
-  [^Connection database entities]
+  [^DataSource database entities]
   (let [sorted-entities (sort-by-dependencies entities)]
     (reduce (fn [migrations entity]
               (entity->migration database migrations entity))
@@ -498,7 +501,7 @@
 
 (defn get-entity-migrations-map
   "Returns a map of shape {:entity/name {:up 'SQL to apply changes' :down 'SQL to drop changes'}}"
-  [^Connection database entities]
+  [^DataSource database entities]
   (let [sorted-entities (sort-by-dependencies entities)]
     (reduce (fn [migrations-map entity]
               (let [migration (entity->migration database [] entity)]
@@ -517,7 +520,7 @@
 
 (defn prep-migrations
   "Generates migrations for all entities in the system (forward and backward)"
-  [^Connection database entities]
+  [^DataSource database entities]
   (let [all-migrations (get-all-migrations database entities)
         [migrations rollback-migrations] (unzip all-migrations)]
     {:migrations          migrations
@@ -537,7 +540,7 @@
 (defn apply-migrations!
   "Generates and applies migrations related to entities on database
    All migrations run in a single transaction"
-  [{:keys [^Connection database entities]}]
+  [{:keys [^DataSource database entities]}]
   (let [{:keys [migrations rollback-migrations]} (prep-migrations database entities)]
     (jdbc/with-transaction [tx database]
       (doseq [migration migrations]
@@ -555,7 +558,7 @@
 
 (defn drop-migrations!
   "Rollback all changes made by apply-migrations! call"
-  [^Connection database rollback-migrations]
+  [^DataSource database rollback-migrations]
   (jdbc/with-transaction [tx database]
     (doseq [migration rollback-migrations]
       (println "Rolling back" migration)
@@ -593,7 +596,7 @@
 
 (defn store-migrations!
   "Writes entities migrations code into files in .edn format"
-  [{:keys [^Connection database entities ^Clock clock path-pattern path-params]
+  [{:keys [^DataSource database entities ^Clock clock path-pattern path-params]
     :or   {clock (Clock/systemUTC)}}]
   (let [migrations (get-entity-migrations-map database entities)
         timestamp  (.millis clock)]
@@ -619,7 +622,7 @@
 (defn validate-schema!
   "Compares DB schema with entities specs.
    Returns true if there's no changes false otherwise"
-  [{:keys [^Connection database entities]}]
+  [{:keys [^DataSource database entities]}]
   (->> entities
        (some (fn [entity]
                (let [table (fx.entity/prop entity :table)]

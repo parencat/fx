@@ -35,9 +35,9 @@
 ; [:name [:string {:max 250}]]
 
 
-(defn get-columns [connection]
+(defn get-columns [ds]
   (jdbc/execute!
-   connection
+   ds
    ["SELECT *
      FROM information_schema.columns
      WHERE table_schema = 'public' AND table_name = 'user';"]
@@ -45,8 +45,8 @@
     :builder-fn  jdbc.rs/as-unqualified-kebab-maps}))
 
 
-(defn get-table-columns-names [connection]
-  (->> (get-columns connection)
+(defn get-table-columns-names [ds]
+  (->> (get-columns ds)
        (map :column-name)
        set))
 
@@ -61,10 +61,10 @@
 
 
 (deftest extract-db-columns-test
-  (pg/with-connection connection
-    (jdbc/execute! connection [user-sql])
+  (pg/with-datasource ds
+    (jdbc/execute! ds [user-sql])
 
-    (let [result    (sut/extract-db-columns connection "user")
+    (let [result    (sut/extract-db-columns ds "user")
           id-column (get result "id")]
       (is (contains? result "id"))
       (is (contains? result "name"))
@@ -76,10 +76,10 @@
 
 
 (deftest get-db-columns-test
-  (pg/with-connection connection
-    (jdbc/execute! connection [user-sql])
+  (pg/with-datasource ds
+    (jdbc/execute! ds [user-sql])
 
-    (let [result (sut/get-db-columns connection "user")]
+    (let [result (sut/get-db-columns ds "user")]
       (is (contains? result :id))
       (is (contains? result :name))
 
@@ -138,26 +138,26 @@
 
 
 (deftest apply-migrations-test
-  (pg/with-connection connection
+  (pg/with-datasource ds
     (let [user-spec (-> user-schema entity/prepare-spec :spec)
           entity    (entity/create-entity :some/test-user user-spec)]
 
       (testing "table create"
-        (sut/apply-migrations! {:database connection
+        (sut/apply-migrations! {:database ds
                                 :entities #{entity}})
 
-        (is (sut/table-exist? connection "user"))
+        (is (sut/table-exist? ds "user"))
         (is (= #{"id" "name"}
-               (->> (get-columns connection)
+               (->> (get-columns ds)
                     (map :column-name)
                     set)))))
 
     (testing "table alter"
       (let [modified-user-spec (-> modified-user-schema entity/prepare-spec :spec)
             entity             (entity/create-entity :some/test-user modified-user-spec)]
-        (sut/apply-migrations! {:database connection
+        (sut/apply-migrations! {:database ds
                                 :entities #{entity}})
-        (let [columns   (get-columns connection)
+        (let [columns   (get-columns ds)
               id-column (mdl/find-first #(= "id" (:column-name %)) columns)]
           (is (= #{"id" "email"}
                  (->> columns
@@ -167,62 +167,62 @@
 
 
 (deftest drop-migrations-test
-  (pg/with-connection connection
+  (pg/with-datasource ds
     (let [entity-spec (-> user-schema entity/prepare-spec :spec)
           entity      (entity/create-entity :some/test-user entity-spec)
-          {:keys [rollback-migrations]} (sut/apply-migrations! {:database connection
+          {:keys [rollback-migrations]} (sut/apply-migrations! {:database ds
                                                                 :entities #{entity}})]
-      (is (sut/table-exist? connection "user"))
+      (is (sut/table-exist? ds "user"))
 
       (testing "partial rollback"
-        (is (-> (get-table-columns-names connection)
+        (is (-> (get-table-columns-names ds)
                 (contains? "name"))
             "name field should be in DB")
 
         (let [modified-spec (-> modified-user-name-schema entity/prepare-spec :spec)
               entity        (entity/create-entity :some/test-user modified-spec)
-              {:keys [rollback-migrations]} (sut/apply-migrations! {:database connection
+              {:keys [rollback-migrations]} (sut/apply-migrations! {:database ds
                                                                     :entities #{entity}})]
-          (is (not (-> (get-table-columns-names connection)
+          (is (not (-> (get-table-columns-names ds)
                        (contains? "name")))
               "after running migrations name field shouldn't exist")
 
-          (sut/drop-migrations! connection rollback-migrations)
+          (sut/drop-migrations! ds rollback-migrations)
 
-          (is (-> (get-table-columns-names connection)
+          (is (-> (get-table-columns-names ds)
                   (contains? "name"))
               "name field should be created again")))
 
-      (is (sut/table-exist? connection "user"))
+      (is (sut/table-exist? ds "user"))
 
       (testing "table should be dropped"
-        (sut/drop-migrations! connection rollback-migrations)
-        (is (not (sut/table-exist? connection "user")))))))
+        (sut/drop-migrations! ds rollback-migrations)
+        (is (not (sut/table-exist? ds "user")))))))
 
 
 (deftest validate-schema-test
-  (pg/with-connection connection
+  (pg/with-datasource ds
     (let [entity-spec (-> user-schema entity/prepare-spec :spec)
           entity      (entity/create-entity :some/test-user entity-spec)]
-      (is (false? (sut/validate-schema! {:database connection
+      (is (false? (sut/validate-schema! {:database ds
                                          :entities #{entity}}))
           "user doesn't created yet")
 
-      (sut/apply-migrations! {:database connection
+      (sut/apply-migrations! {:database ds
                               :entities #{entity}})
 
-      (is (sut/validate-schema! {:database connection
+      (is (sut/validate-schema! {:database ds
                                  :entities #{entity}})
           "db schema and entity should match"))))
 
 
 (deftest store-migrations-test
-  (pg/with-connection connection
+  (pg/with-datasource ds
     (let [entity-spec (-> user-schema entity/prepare-spec :spec)
           entity      (entity/create-entity :some/test-user entity-spec)
           fixed-clock (Clock/fixed (Instant/now) ZoneOffset/UTC)]
       (testing "migration file should be created"
-        (sut/store-migrations! {:database connection
+        (sut/store-migrations! {:database ds
                                 :entities #{entity}
                                 :clock    fixed-clock})
         (let [path      (format "resources/migrations/%d-%s-%s.edn" (.millis fixed-clock) "some" "test-user")
@@ -233,7 +233,7 @@
           (io/delete-file (io/file "resources/migrations"))))
 
       (testing "migration file should follow the path pattern"
-        (sut/store-migrations! {:database     connection
+        (sut/store-migrations! {:database     ds
                                 :entities     #{entity}
                                 :clock        fixed-clock
                                 :path-pattern "resources/some/${entity}/${number}.edn"

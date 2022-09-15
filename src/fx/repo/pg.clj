@@ -14,7 +14,8 @@
    [fx.migrate :as migrate]
    [fx.repo :refer [IRepo]])
   (:import
-   [java.sql Connection PreparedStatement]
+   [javax.sql DataSource]
+   [java.sql PreparedStatement]
    [org.postgresql.util PGobject]
    [fx.entity Entity]
    [clojure.lang IPersistentMap IPersistentVector]))
@@ -324,7 +325,7 @@
 
 (defn pg-save!
   "Save record in database"
-  [^Connection database entity data]
+  [^DataSource database entity data]
   (let [table   (fx.entity/prop entity :table)
         columns (fx.entity/entity-columns entity)
         values  (fx.entity/entity-values entity data)
@@ -343,7 +344,7 @@
 
 (defn pg-update!
   "Update record in database"
-  [^Connection database entity data {:keys [where] :as params}]
+  [^DataSource database entity data {:keys [where] :as params}]
   (let [table        (fx.entity/prop entity :table)
         columns      (fx.entity/entity-columns entity)
         eq-clauses   (some-> (select-keys params columns)
@@ -367,7 +368,7 @@
 
 (defn pg-delete!
   "Delete record from database"
-  [^Connection database entity {:keys [where] :as params}]
+  [^DataSource database entity {:keys [where] :as params}]
   (let [table        (fx.entity/prop entity :table)
         columns      (fx.entity/entity-columns entity)
         eq-clauses   (some-> (select-keys params columns)
@@ -390,7 +391,7 @@
 
 (defn pg-find!
   "Get single record from the database"
-  [^Connection database entity {:keys [fields where nested] :as params}]
+  [^DataSource database entity {:keys [fields where nested] :as params}]
   (let [columns    (fx.entity/entity-columns entity)
         eq-clauses (some-> (select-keys params columns)
                            (not-empty)
@@ -419,7 +420,7 @@
 
 (defn pg-find-all!
   "Return multiple records from the database"
-  [^Connection database entity {:keys [fields where order-by limit offset nested] :as params}]
+  [^DataSource database entity {:keys [fields where order-by limit offset nested] :as params}]
   (let [columns    (fx.entity/entity-columns entity)
         eq-clauses (some-> (select-keys params columns)
                            (not-empty)
@@ -469,7 +470,7 @@
     (assoc config :rollback-migrations rollback-migrations)))
 
 
-(defmethod ig/halt-key! :fx.repo.pg/migrate [_ {:keys [^Connection database strategy rollback-migrations]}]
+(defmethod ig/halt-key! :fx.repo.pg/migrate [_ {:keys [^DataSource database strategy rollback-migrations]}]
   (when (= strategy :update-drop)
     (migrate/drop-migrations! database rollback-migrations)))
 

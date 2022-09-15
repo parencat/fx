@@ -6,7 +6,7 @@
    [fx.containers.postgres :as pg]
    [malli.instrument :as mi])
   (:import
-   [java.sql Connection]))
+   [javax.sql DataSource]))
 
 
 (duct/load-hierarchy)
@@ -39,9 +39,9 @@
                            :fx.database/connection {:url url}}}
         config           (duct/prep-config valid-url-config)
         system           (ig/init config)
-        connection       (:fx.database/connection system)]
+        ds               (:fx.database/connection system)]
 
-    (is (instance? Connection connection))
+    (is (instance? DataSource ds))
 
     (ig/halt! system)))
 
@@ -62,8 +62,8 @@
                                                     :port   port}}}
         config           (duct/prep-config valid-url-config)
         system           (ig/init config)
-        connection       (:fx.database/connection system)]
+        ds               (:fx.database/connection system)]
 
-    (is (instance? Connection connection))
+    (is (instance? DataSource ds))
 
     (ig/halt! system)))

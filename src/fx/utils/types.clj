@@ -2,7 +2,7 @@
   (:require
    [malli.core :as m])
   (:import
-   [java.sql Connection]
+   [javax.sql DataSource]
    [java.time Clock]
    [org.postgresql.util PGobject]))
 
@@ -10,7 +10,7 @@
 (def connection?
   (m/-simple-schema
    {:type :db/connection
-    :pred #(instance? Connection %)}))
+    :pred #(instance? DataSource %)}))
 
 
 (def clock?
