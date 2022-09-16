@@ -15,13 +15,13 @@
 
 (def ^{:fx/autowire :fx/entity} dumb-entity
   [:spec {:table "dumb-test"}
-   [:id {:primary-key? true} [:string {:max 250}]]
+   [:id {:identity? true} [:string {:max 250}]]
    [:user {:many-to-one? true} :fx.entity-test/user]])
 
 
 (def ^{:fx/autowire :fx/entity} user
   [:spec {:table "user"}
-   [:id {:primary-key? true} uuid?]
+   [:id {:identity? true} uuid?]
    [:name [:string {:max 250}]]
    [:last-name {:optional? true} string?]
    [:client {:many-to-one? true} :fx.entity-test/client]
@@ -30,14 +30,14 @@
 
 (def ^{:fx/autowire :fx/entity} client
   [:spec {:table "client"}
-   [:id {:primary-key? true} uuid?]
+   [:id {:identity? true} uuid?]
    [:name [:string {:max 250}]]
    [:user {:one-to-many? true} :fx.entity-test/user]])
 
 
 (def ^{:fx/autowire :fx/entity} role
   [:spec {:table "role"}
-   [:id {:primary-key? true} uuid?]
+   [:id {:identity? true} uuid?]
    [:name [:string {:max 250}]]
    [:user {:one-to-many? true} :fx.entity-test/user]])
 

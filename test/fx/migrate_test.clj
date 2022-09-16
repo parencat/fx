@@ -18,20 +18,20 @@
 
 (def user-schema
   [:spec {:table "user"}
-   [:id {:primary-key? true} uuid?]
+   [:id {:identity? true} uuid?]
    [:name [:string {:max 250}]]])
 
 
 (def modified-user-schema
   [:spec {:table "user"}
-   [:id {:primary-key? true} string?] ;; uuid? -> string?
+   [:id {:identity? true} string?] ;; uuid? -> string?
    ; [:name [:string {:max 100}]]     ;; deleted
    [:email string?]]) ;; added
 
 
 (def modified-user-name-schema
   [:spec {:table "user"}
-   [:id {:primary-key? true} uuid?]])
+   [:id {:identity? true} uuid?]])
 ; [:name [:string {:max 250}]]
 
 
@@ -258,7 +258,7 @@
 
 (def entity-w-wrapped-fields
   [:spec {:table "user"}
-   [:id {:primary-key? true} uuid?]
+   [:id {:identity? true} uuid?]
    [:column {:wrap? true} [:string {:max 250}]]])
 
 

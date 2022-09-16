@@ -89,8 +89,8 @@
   (let [props (fx.entity/properties field-schema)]
     (cond-> []
             (not (:optional props)) (conj [:not nil])
-            (:primary-key? props) (conj [:primary-key])
-            (:foreign-key? props) (conj [:references [:raw (fx.entity/ref-field-prop field-schema :table)]])
+            (:identity? props) (conj [:primary-key])
+            (:reference? props) (conj [:references [:raw (fx.entity/ref-field-prop field-schema :table)]])
             (:cascade? props) (conj [:raw "on delete cascade"]))))
 
 (m/=> schema->column-modifiers
@@ -119,8 +119,8 @@
   (let [props (fx.entity/properties entry-schema)]
     (cond-> {}
             (some? (:optional props)) (assoc :optional (:optional props))
-            (:primary-key? props) (assoc :primary-key? true)
-            (:foreign-key? props) (assoc :foreign-key? (fx.entity/ref-field-prop entry-schema :table))
+            (:identity? props) (assoc :primary-key? true)
+            (:reference? props) (assoc :foreign-key? (fx.entity/ref-field-prop entry-schema :table))
             (:cascade? props) (assoc :cascade? true))))
 
 (m/=> schema->constraints-map

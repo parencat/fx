@@ -13,7 +13,7 @@
 
 (def ^{:fx/autowire :fx/entity} person
   [:spec {:table "person"}
-   [:id {:primary-key? true} :uuid]
+   [:id {:identity? true} :uuid]
    [:name :string]
    [:column {:wrap? true} :string]])
 
@@ -95,14 +95,14 @@
 
 (def ^{:fx/autowire :fx/entity} user
   [:spec {:table "user"}
-   [:id {:primary-key? true} :uuid]
+   [:id {:identity? true} :uuid]
    [:name :string]
    [:post {:one-to-one? true} ::post]])
 
 
 (def ^{:fx/autowire :fx/entity} post
   [:spec {:table "post"}
-   [:id {:primary-key? true} :uuid]
+   [:id {:identity? true} :uuid]
    [:title :string]
    [:users {:one-to-many? true} ::user]])
 

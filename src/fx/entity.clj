@@ -20,7 +20,7 @@
 (def EntityRawSpec
   "Recursive malli schema to parse provided by user entities schemas e.g.
    [:spec {:table \"client\"}
-     [:id {:primary-key? true} uuid?]
+     [:id {:identity? true} uuid?]
      [:name [:string {:max 250}]]
      [:user {:one-to-many? true} :fx.entity-test/user]]"
   [:schema
@@ -120,7 +120,7 @@
   [schema]
   (let [[pkey pkey-val] (->> (m/entries schema {:registry entities-registry})
                              (filter (fn [[_ v]]
-                                       (-> v m/properties :primary-key?)))
+                                       (-> v m/properties :identity?)))
                              first)
         pkey-type (-> pkey-val m/children first)]
     [:or pkey-type [:map [pkey pkey-type]]]))
@@ -309,7 +309,7 @@
   (let [schema (mr/schema entities-registry (or (:type entity) entity))]
     (->> (m/entries schema {:registry entities-registry})
          (filter (fn [[_ v]]
-                   (-> v m/properties :primary-key?))) ;; TODO change to the :identity? keyword
+                   (-> v m/properties :identity?)))
          first)))
 
 (m/=> ident-field-schema
@@ -421,7 +421,7 @@
   (->> (entity-fields target)
        (filter (fn [[_ v]]
                  (let [entry-schema (-> v m/children first)]
-                   (and (-> v m/properties :foreign-key?)
+                   (and (-> v m/properties :reference?)
                         (= (:type dependency)
                            (-> entry-schema m/properties :entity))))))
        not-empty
@@ -469,7 +469,7 @@
                         field'        (cond-> field
                                               ref?
                                               (-> (assoc :type (-> type second ->ref-spec-type))
-                                                  (assoc-in [:properties :foreign-key?] true))
+                                                  (assoc-in [:properties :reference?] true))
 
                                               (or optional-prop optional-ref)
                                               (-> (assoc-in [:properties :optional] true)
