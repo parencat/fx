@@ -12,7 +12,8 @@
    [fx.utils.types :refer [pgobject? connection?]]
    [fx.entity]
    [fx.migrate :as migrate]
-   [fx.repo :refer [IRepo]])
+   [fx.repo :refer [IRepo]]
+   [clojure.string :as str])
   (:import
    [javax.sql DataSource]
    [java.sql PreparedStatement]
@@ -242,22 +243,26 @@
   [entity nested]
   (cond
     (true? nested)  ;; return all nested records
-    (->> (fx.entity/entity-all-fields entity)
-         (filter (fn [[_ field]] (fx.entity/ref? field))))
+    (->> (fx.entity/entity-fields entity)
+         (filter (fn [[_ field]]
+                   (and (fx.entity/ref? field)
+                        (some? (fx.entity/ref-field-prop field :table))))))
 
     (vector? nested) ;; return only listed nested records
     (let [nested-set (set nested)]
-      (->> (fx.entity/entity-all-fields entity)
+      (->> (fx.entity/entity-fields entity)
            (filter (fn [[field-key field]]
                      (and (contains? nested-set field-key)
-                          (fx.entity/ref? field))))))
+                          (fx.entity/ref? field)
+                          (some? (fx.entity/ref-field-prop field :table)))))))
 
     (map? nested)   ;; fine-grained control of nested entities
     (let [nested-set (set (keys nested))]
-      (->> (fx.entity/entity-all-fields entity)
+      (->> (fx.entity/entity-fields entity)
            (filter (fn [[field-key field]]
                      (and (contains? nested-set field-key)
-                          (fx.entity/ref? field))))))
+                          (fx.entity/ref? field)
+                          (some? (fx.entity/ref-field-prop field :table)))))))
 
     :else []))
 
@@ -275,7 +280,7 @@
                        :from   [table]}
         refs          (get-refs-list entity nested)]
     (reduce (fn [query [ref-key ref]]
-              (let [ref-name   (name ref-key)
+              (let [ref-name   (str/replace (name ref-key) "-" "_")
                     join-query (prep-join-query {:entity     entity
                                                  :ref        ref
                                                  :table-name table-name
@@ -300,7 +305,7 @@
 (defn coerce-nested-records
   "Nested records returned as JSON. This function will use nested entity spec to coerce record fields"
   [entity record]
-  (let [refs (->> (fx.entity/entity-all-fields entity)
+  (let [refs (->> (fx.entity/entity-fields entity)
                   (filter (fn [[_ field]] (fx.entity/ref? field))))]
     (reduce (fn [rec [ref-key ref]]
               (let [ref-entity (fx.entity/ref-type-prop ref :entity)]
@@ -323,16 +328,40 @@
    map?])
 
 
+(defn lift-data [x]
+  (if (or (vector? x)
+          (map? x))
+    [:lift x]
+    x))
+
+
+(defn simple-val-or-nested-entity [[_ field-schema]]
+  (or (not (fx.entity/ref? field-schema))
+      (let [props     (fx.entity/properties field-schema)
+            ref-table (fx.entity/ref-field-prop field-schema :table)]
+        (or (not ref-table)
+            (not (fx.entity/optional-ref? props))))))
+
+
+(defn entity-columns [entity]
+  (->> (fx.entity/entity-fields entity)
+       (filter simple-val-or-nested-entity)
+       (mapv key)))
+
+
 (defn pg-save!
   "Save record in database"
   [^DataSource database entity data]
-  (let [table   (fx.entity/prop entity :table)
-        columns (fx.entity/entity-columns entity)
-        values  (fx.entity/entity-values entity data)
-        query   (-> {:insert-into table
-                     :columns     (mapv #(->column-name entity %) columns)
-                     :values      [values]}
-                    (sql/format))]
+  (let [table     (fx.entity/prop entity :table)
+        columns   (entity-columns entity)
+        values-fn (apply juxt columns)
+        values    (->> data
+                       values-fn
+                       (mapv lift-data))
+        query     (-> {:insert-into table
+                       :columns     (mapv #(->column-name entity %) columns)
+                       :values      [values]}
+                      (sql/format))]
     (jdbc/execute-one! database query
       {:return-keys true
        :builder-fn  jdbc.rs/as-unqualified-kebab-maps})))
@@ -346,17 +375,17 @@
   "Update record in database"
   [^DataSource database entity data {:keys [where] :as params}]
   (let [table        (fx.entity/prop entity :table)
-        columns      (fx.entity/entity-columns entity)
+        columns      (entity-columns entity)
         eq-clauses   (some-> (select-keys params columns)
                              (not-empty)
                              (sql/map=))
         where-clause (if (some? eq-clauses)
                        [:and where eq-clauses]
                        where)
-        query        (-> {:update (keyword table)
-                          :set    data
-                          :where  where-clause}
-                         (sql/format {:quoted true}))]
+        query        (-> {:update-raw [:quote table]
+                          :set        (update-vals data lift-data)
+                          :where      where-clause}
+                         (sql/format))]
     (jdbc/execute-one! database query
       {:return-keys true
        :builder-fn  jdbc.rs/as-unqualified-kebab-maps})))
@@ -370,7 +399,7 @@
   "Delete record from database"
   [^DataSource database entity {:keys [where] :as params}]
   (let [table        (fx.entity/prop entity :table)
-        columns      (fx.entity/entity-columns entity)
+        columns      (entity-columns entity)
         eq-clauses   (some-> (select-keys params columns)
                              (not-empty)
                              (sql/map=))
@@ -391,8 +420,8 @@
 
 (defn pg-find!
   "Get single record from the database"
-  [^DataSource database entity {:keys [fields where nested] :as params}]
-  (let [columns    (fx.entity/entity-columns entity)
+  [^DataSource database entity {:keys [fields where nested] :as params}] ;; TODO add exclude parameter to filter fields
+  (let [columns    (entity-columns entity)
         eq-clauses (some-> (select-keys params columns)
                            (not-empty)
                            (sql/map=))
@@ -421,7 +450,7 @@
 (defn pg-find-all!
   "Return multiple records from the database"
   [^DataSource database entity {:keys [fields where order-by limit offset nested] :as params}]
-  (let [columns    (fx.entity/entity-columns entity)
+  (let [columns    (entity-columns entity)
         eq-clauses (some-> (select-keys params columns)
                            (not-empty)
                            (sql/map=))

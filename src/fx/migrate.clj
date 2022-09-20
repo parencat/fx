@@ -49,11 +49,14 @@
    e.g. :my/user -> :uuid
    Type could be complex e.g. [:string 250]"
   [entity-key]
-  (-> entity-key
-      fx.entity/ident-field-schema
-      val
-      fx.entity/field-schema
-      schema->column-type))
+  (let [table (fx.entity/prop entity-key :table)]
+    (if (some? table)
+      (-> entity-key
+          fx.entity/ident-field-schema
+          val
+          fx.entity/field-schema
+          schema->column-type)
+      (schema->column-type {:type :jsonb :props nil}))))
 
 (m/=> get-ref-type
   [:=> [:cat :qualified-keyword]
@@ -71,6 +74,8 @@
     [:string _] :varchar
     ['string? _] :varchar
 
+    [:jsonb _] :jsonb
+
     [:entity-ref {:entity entity-key}] (get-ref-type entity-key)
 
     :else (throw (ex-info (str "Unknown type for column " type) {:type type}))))
@@ -86,12 +91,15 @@
   "Given an entity schema will return a vector of SQL field constraints, shaped as HoneySQL clauses
    e.g. [[:not nil] [:primary-key]]"
   [field-schema]
-  (let [props (fx.entity/properties field-schema)]
+  (let [props     (fx.entity/properties field-schema)
+        ref-table (delay (fx.entity/ref-field-prop field-schema :table))]
     (cond-> []
             (not (:optional props)) (conj [:not nil])
             (:identity? props) (conj [:primary-key])
-            (:reference? props) (conj [:references [:raw (fx.entity/ref-field-prop field-schema :table)]])
-            (:cascade? props) (conj [:raw "on delete cascade"]))))
+            (:cascade? props) (conj [:raw "on delete cascade"])
+
+            (and (:reference? props) (some? @ref-table))
+            (conj [:references [:quote @ref-table]]))))
 
 (m/=> schema->column-modifiers
   [:=> [:cat fx.entity/schema?]
@@ -116,12 +124,15 @@
   "Converts entity field spec to a map of fields constraints
    e.g. {:optional false :primary-key? true}"
   [entry-schema]
-  (let [props (fx.entity/properties entry-schema)]
+  (let [props     (fx.entity/properties entry-schema)
+        ref-table (delay (fx.entity/ref-field-prop entry-schema :table))]
     (cond-> {}
             (some? (:optional props)) (assoc :optional (:optional props))
             (:identity? props) (assoc :primary-key? true)
-            (:reference? props) (assoc :foreign-key? (fx.entity/ref-field-prop entry-schema :table))
-            (:cascade? props) (assoc :cascade? true))))
+            (:cascade? props) (assoc :cascade? true)
+
+            (and (:reference? props) (some? @ref-table))
+            (assoc :foreign-key? @ref-table))))
 
 (m/=> schema->constraints-map
   [:=> [:cat fx.entity/schema?]
@@ -251,9 +262,15 @@
    e.g. [[:id :uuid [:not nil] [:primary-key]] ...]"
   [entity]
   (->> (fx.entity/entity-fields entity)
+       (filter (fn [[_ field-schema]]
+                 (or (not (fx.entity/ref? field-schema))
+                     (let [props     (fx.entity/properties field-schema)
+                           ref-table (fx.entity/ref-field-prop field-schema :table)]
+                       (or (not ref-table)
+                           (not (fx.entity/optional-ref? props)))))))
        (mapv (fn [[field-key schema]]
                (let [column-name (->column-name entity field-key)]
-                 (-> [column-name (-> schema fx.entity/field-schema schema->column-type)]
+                 (-> [column-name [:inline (-> schema fx.entity/field-schema schema->column-type)]]
                      (concat (schema->column-modifiers schema))
                      vec))))))
 
@@ -265,8 +282,8 @@
 (defn create-table-ddl
   "Returns HoneySQL formatted map representing create SQL clause"
   [table columns]
-  (sql/format {:create-table table
-               :with-columns columns}))
+  (sql/format {:create-table     table
+               :with-columns-raw columns}))
 
 
 (defn drop-table-ddl
@@ -468,7 +485,7 @@
          (map (fn [e] (get emap e))))))
 
 (m/=> sort-by-dependencies
-  [:=> [:cat [:set fx.entity/entity?]]
+  [:=> [:cat [:sequential fx.entity/entity?]]
    [:sequential fx.entity/entity?]])
 
 
@@ -485,14 +502,32 @@
    [:sequential {:min 2 :max 2} vector?]])
 
 
+(defn has-table? [entity]
+  (some? (fx.entity/prop entity :table)))
+
+(m/=> has-table?
+  [:=> [:cat fx.entity/entity?]
+   :boolean])
+
+
+(defn clean-up-entities [entities]
+  (->> entities
+       (filter has-table?)
+       sort-by-dependencies))
+
+(m/=> clean-up-entities
+  [:=> [:cat [:set fx.entity/entity?]]
+   [:sequential fx.entity/entity?]])
+
+
 (defn get-all-migrations
   "Returns a two-dimensional vector of migration strings for all changed entities.
    For each entity will be two items 'SQL to apply changes' followed with 'SQL to drop changes'"
   [^DataSource database entities]
-  (let [sorted-entities (sort-by-dependencies entities)]
+  (let [cln-entities (clean-up-entities entities)]
     (reduce (fn [migrations entity]
               (entity->migration database migrations entity))
-            [] sorted-entities)))
+            [] cln-entities)))
 
 (m/=> get-all-migrations
   [:=> [:cat connection? [:set fx.entity/entity?]]
@@ -502,14 +537,14 @@
 (defn get-entity-migrations-map
   "Returns a map of shape {:entity/name {:up 'SQL to apply changes' :down 'SQL to drop changes'}}"
   [^DataSource database entities]
-  (let [sorted-entities (sort-by-dependencies entities)]
+  (let [cln-entities (clean-up-entities entities)]
     (reduce (fn [migrations-map entity]
               (let [migration (entity->migration database [] entity)]
                 (if (seq migration)
                   (assoc migrations-map (:type entity) {:up   (first migration)
                                                         :down (second migration)})
                   migrations-map)))
-            {} sorted-entities)))
+            {} cln-entities)))
 
 (m/=> get-entity-migrations-map
   [:=> [:cat connection? [:set fx.entity/entity?]]

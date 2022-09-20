@@ -84,6 +84,12 @@
 (declare entities-registry)
 
 
+(defn string->identity [ref x]
+  (if (string? x)
+    (m/decode ref x {:registry entities-registry} mt/string-transformer)
+    x))
+
+
 (def registry*
   "Atom to hold malli schemas"
   (atom (merge
@@ -91,8 +97,9 @@
          {:spec       (m/-map-schema)
           :entity-ref (m/-simple-schema
                        (fn [{:keys [entity-ref]} _]
-                         {:type :entity-ref
-                          :pred #(m/validate entity-ref % {:registry entities-registry})}))})))
+                         {:type            :entity-ref
+                          :pred            #(m/validate entity-ref % {:registry entities-registry})
+                          :type-properties {:decode/string #(string->identity entity-ref %)}}))})))
 
 
 (def entities-registry
@@ -226,26 +233,9 @@
   [entity]
   (let [entity-type (:type entity)
         schema      (mr/schema entities-registry entity-type)]
-    (->> (m/entries schema {:registry entities-registry})
-         (filter (fn [entry]
-                   (if-some [props (-> entry val m/properties)]
-                     (not (optional-ref? props))
-                     true))))))
-
-(m/=> entity-fields
-  [:=> [:cat entity?]
-   [:sequential entity-field-schema?]])
-
-
-
-(defn entity-all-fields
-  "Return a list of entity fields specs (map-entries) including optional relations"
-  [entity]
-  (let [entity-type (:type entity)
-        schema      (mr/schema entities-registry entity-type)]
     (m/entries schema {:registry entities-registry})))
 
-(m/=> entity-all-fields
+(m/=> entity-fields
   [:=> [:cat entity?]
    [:sequential entity-field-schema?]])
 
@@ -274,20 +264,6 @@
 (m/=> entity-columns
   [:=> [:cat entity?]
    [:sequential :keyword]])
-
-
-(defn entity-values
-  "Extract entity columns data.
-   map -> table e.g.
-   {:id 1 :name 'Jack'} -> [1 'Jack']"
-  [entity data]
-  (let [columns          (entity-columns entity)
-        get-columns-vals (apply juxt columns)]
-    (get-columns-vals data)))
-
-(m/=> entity-values
-  [:=> [:cat entity? map?]
-   [:vector :any]])
 
 
 (defn ref?
@@ -355,13 +331,13 @@
 (defn prop
   "Get the property from entity by key"
   [entity prop-key]
-  (let [entity-type (:type entity)]
+  (let [entity-type (or (:type entity) entity)]
     (-> (mr/schema entities-registry entity-type)
         (m/properties {:registry entities-registry})
         (get prop-key))))
 
 (m/=> prop
-  [:=> [:cat entity? :keyword]
+  [:=> [:cat [:or entity? :qualified-keyword] :keyword]
    :any])
 
 
@@ -420,8 +396,10 @@
   [target dependency]
   (->> (entity-fields target)
        (filter (fn [[_ v]]
-                 (let [entry-schema (-> v m/children first)]
-                   (and (-> v m/properties :reference?)
+                 (let [entry-schema (-> v m/children first)
+                       props        (m/properties v)]
+                   (and (:reference? props)
+                        (not (optional-ref? props))
                         (= (:type dependency)
                            (-> entry-schema m/properties :entity))))))
        not-empty
@@ -471,7 +449,7 @@
                                               (-> (assoc :type (-> type second ->ref-spec-type))
                                                   (assoc-in [:properties :reference?] true))
 
-                                              (or optional-prop optional-ref)
+                                              optional-prop
                                               (-> (assoc-in [:properties :optional] true)
                                                   (mdl/dissoc-in [:properties :optional?])))]
                     {:fields (conj fields field')

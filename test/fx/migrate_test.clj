@@ -4,15 +4,19 @@
    [fx.migrate :as sut]
    [fx.containers.postgres :as pg]
    [fx.entity :as entity]
+   [fx.repo :as fx.repo]
    [next.jdbc :as jdbc]
    [next.jdbc.result-set :as jdbc.rs]
    [malli.instrument :as mi]
    [medley.core :as mdl]
-   [clojure.java.io :as io])
+   [clojure.java.io :as io]
+   [duct.core :as duct]
+   [integrant.core :as ig])
   (:import
    [java.time Clock Instant ZoneOffset]))
 
 
+(duct/load-hierarchy)
 (mi/instrument!)
 
 
@@ -272,3 +276,99 @@
                                 :column {:type [:string 250]}})
              {:rollbacks '({:drop-column [:quote :column]})
               :updates   '({:add-column [[:quote :column] [:string 250] [:not nil]]})})))))
+
+
+
+(def config
+  {:duct.profile/base                 {:duct.core/project-ns 'test}
+   :fx.module/autowire                {:root 'fx.migrate-test}
+   :fx.module/repo                    {:migrate {:strategy :update-drop}}
+   :fx.containers.postgres/connection {}})
+
+
+(def ^{:fx/autowire :fx/entity} user
+  [:spec {:table "user"}
+   [:id {:identity? true} :uuid]
+   [:name :string]])
+
+
+(def ^{:fx/autowire :fx/entity} post
+  [:spec {:table "post"}
+   [:id {:identity? true} :uuid]
+   [:created-by {:many-to-one? true} ::user]
+   [:current-version {:many-to-one? true} ::post-version]
+   [:versions {:one-to-many? true} ::post-version]])
+
+
+(def ^{:fx/autowire :fx/entity} post-version
+  [:spec
+   [:id {:identity? true} :uuid]
+   [:title :string]
+   [:content :string]
+   [:updated-by {:one-to-one? true} ::user]])
+
+
+(deftest entities-without-table-test
+  (let [config (duct/prep-config config)
+        system (ig/init config)]
+
+    (testing "entities w/o table property in spec doesn't have table in the database"
+      (let [all-entities (set (map val (ig/find-derived system :fx/entity)))
+            user         (val (ig/find-derived-1 system ::user))
+            post         (val (ig/find-derived-1 system ::post))
+            ds           (val (ig/find-derived-1 system :fx.database/connection))]
+        (is (= (sut/clean-up-entities all-entities)
+               (list user post))
+            "post-version entity excluded")
+
+        (is (not (sut/table-exist? ds "post_version")))))
+
+    (testing "entities w/o table property saved as json as part of the parent entity"
+      (let [user         (val (ig/find-derived-1 system ::user))
+            post         (val (ig/find-derived-1 system ::post))
+
+            user-id      (random-uuid)
+            post-id      (random-uuid)
+            version-2-id (random-uuid)
+            version-1-id (random-uuid)
+
+            version-1    {:id         version-1-id
+                          :title      "First title"
+                          :content    "Content"
+                          :updated-by user-id}
+            version-2    {:id         version-2-id
+                          :title      "Second title"
+                          :content    "New Content"
+                          :updated-by user-id}]
+
+        (fx.repo/save! user {:id   user-id
+                             :name "Jack"})
+
+        (fx.repo/save! post {:id              post-id
+                             :created-by      user-id
+                             :current-version version-1
+                             :versions        [version-1]})
+
+        (let [result (fx.repo/find! post {:id post-id})]
+          (is (some? result))
+          (is (= (str version-1-id)
+                 (get-in result [:current-version :id]))))
+
+        (fx.repo/update! post
+                         {:current-version version-2
+                          :versions        [version-2 version-1]}
+                         {:id post-id})
+
+        (let [result (fx.repo/find! post {:id post-id})]
+          (is (= 2 (count (:versions result))))
+          (is (= (str version-2-id)
+                 (get-in result [:current-version :id]))))
+
+        (testing "crud functions can recognize entities w/o table property and build valid queries"
+          (let [result (fx.repo/find! post {:id     post-id
+                                            :nested true})]
+            (is (= version-2-id (get-in result [:current-version :id])))
+            (is (= user-id (get-in result [:current-version :updated-by])))))))
+
+
+    (ig/halt! system)))
