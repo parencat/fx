@@ -1,4 +1,4 @@
-(defproject io.github.parencat/fx "0.1.0"
+(defproject io.github.parencat/fx "0.1.1-SNAPSHOT"
   :description "Set of Duct modules for rapid clojure development"
   :url "https://github.com/parencat/fx"
 
