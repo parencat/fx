@@ -1,4 +1,4 @@
-(defproject io.github.parencat/fx "0.1.1-SNAPSHOT"
+(defproject io.github.parencat/fx "0.1.0"
   :description "Set of Duct modules for rapid clojure development"
   :url "https://github.com/parencat/fx"
 
@@ -11,13 +11,13 @@
                  [duct/core "0.8.0"]
                  [integrant "0.8.0"]
                  [weavejester/dependency "0.2.1"]
-                 [metosin/malli "0.8.9"]
                  [medley "1.4.0"]
+                 [metosin/malli "0.8.9"]
                  [differ "0.3.3"]
                  [com.github.seancorfield/next.jdbc "1.3.828"]
-                 [hikari-cp "2.14.0"]
                  [com.github.seancorfield/honeysql "2.3.928"]
                  [org.postgresql/postgresql "42.5.0"]
+                 [hikari-cp "2.14.0"]
                  [clj-test-containers "0.7.0"]
                  [org.testcontainers/postgresql "1.17.3"]
                  [com.cnuernber/charred "1.012"]]
