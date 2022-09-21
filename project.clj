@@ -33,7 +33,7 @@
 
   :release-tasks
   [["vcs" "assert-committed"]
-   ["change" "version" "leiningen.release/bump-version" "release"]
+   ["change" "version" "leiningen.release/bump-version"]
    ["vcs" "commit"]
    ["vcs" "tag" "--no-sign"]
    ["deploy" "clojars"]
