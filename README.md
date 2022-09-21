@@ -1,109 +1,126 @@
-# FX framework
+# FX
 
-Set of Duct modules for rapid clojure development
+Set of Duct modules for a rapid clojure development.
+
+## Installation
+
+Assuming you already have a Duct project bootstrapped. 
+Add to your leiningen dependencies:
+
+```clojure
+[parencat/fx "0.1.0"]
+```
 
 ## Modules
 
 ### `:fx.module/autowire`
 
-Module for scanning project namespaces, converting your components to integrant keys and generating Duct config on the fly.
-You can use clojure metadata to mark functions or variables as system components:
+Autowire module purpose is to reduce a hassle while configuring your application components. This module will scan your
+project namespaces. Whenever Autowire will find some ns members (vars or functions)
+with `:fx/autowire` key in the metadata it will automatically create an integrant key and a configuration map.
+
+To enable autowire module add this key to your Duct `config.edn` file
 
 ```clojure
+{:duct.profile/base
+ {:duct.core/project-ns your-project-root-namespace}
+
+ ;; other profiles and modules
+
+ :fx.module/autowire {}}
+```
+
+You can limit a number of scanned namespaces by providing a `:root` path for some file or folder
+
+```clojure
+{:duct.profile/base
+ {:duct.core/project-ns your-project-root-namespace}
+
+ ;; other profiles and modules
+
+ :fx.module/autowire {:root your-project-root-namespace/components}}
+```
+
+After that you can attach `:fx/autowire` key to any members, e.g.
+
+```clojure
+(ns my-project.core)
+
 (def ^:fx/autowire db-connection
   (jdbc/get-connection {:connection-uri "db-uri"
                         :dbtype         "sqlite"}))
 ```
 
+In this case Autowire will create `:my-project.core/db-connection` component and you can reference and use
+it in other components. Notice that autowired components always has a namespaced keyword as its name 
+(to prevent the components name clashes)
+
+e.g.
+
 ```clojure
-(defn ^:fx/autowire health-check [ctx req]
-  {:status :ok})
+(let [db (-> (ig/find-derived-1 system :my-project.core/db-connection)
+             (val))]
+  (jdbc/execute! db ["SELECT * FROM users ..."]))
 ```
 
-Also, you can specify dependencies for your keys as arguments metadata:
+Also, you can specify dependencies for your components as arguments metadata:
 
 ```clojure
-(defn ^:fx/autowire status
-  [^:my-namespace/db-connection db-connection]
-  {:status     :ok
-   :connection (db-connection)})
+(defn ^:fx/autowire get-users [^:my-project.core/db-connection db]
+  (fn []
+    {:status :ok
+     :users  (jdbc/execute! db ["SELECT * FROM users ..."])}))
 ```
-Notice that components has a namespaced keys.
 
-Also, you can specify `:fx.module/wrap-fn true` to wrap a component for the later usage e.g.  
-without wrapping you have to return an anonymous function which holds the dependencies as closures:
+This kind of dependency injection already built-in into the Duct framework, 
+Autowire is just reducing some boilerplate around it.
+
+#### Additional options
+
+`:fx/halt`
+
+By default, Autowire will create only `ig/init-key` methods for found components. 
+It is possible to create a `ig/halt-key!` method as well. 
+All you need it's to add `:fx/halt` key with the name of component to the metadata 
 
 ```clojure
-(defn select-all-todo-handler
-  {:fx/autowire true}
-  [^:my-namespace/db-connection db _request-params]
-  (fn [_]
+(ns my-project.core
+  (:import
+   [java.sql Connection]))
+
+(def ^:fx/autowire db-connection
+  (jdbc/get-connection {:connection-uri "db-uri"
+                        :dbtype         "sqlite"}))
+
+(defn close-connection
+  {:fx/autowire true
+   :fx/halt     ::db-connection}
+  [^Connection conn]
+  (.close conn))
+```
+
+`:fx/wrap`
+
+You can add `:fx/wrap` key to wrap a component in the anonymous function for the later usage.  
+Without wrapping you'll have to return an anonymous function which holds the dependencies as closures:
+
+```clojure
+(defn ^:fx/autowire get-users 
+  [^:my-project.core/db-connection db]
+  (fn [request]
     {:status  200
      :headers {"Content-Type" "application/json"}
-     :body    (jdbc.sql/query db select-all-todo)}))
+     :body    (jdbc/execute! db ["SELECT * FROM users ..."])}))
 ```
 
-with wrapping your component will return the partially applied function:
+with wrapping your component will be initialized with the partially applied function:
 
 ```clojure
-(defn select-all-todo-handler
-  {:fx/autowire true
-   :fx/wrap     true}
-  [^:my-namespace/db-connection db _request-params]
+(defn ^:fx/autowire ^:fx/wrap get-users
+  [^:my-project.core/db-connection db request]
   {:status  200
    :headers {"Content-Type" "application/json"}
-   :body    (jdbc.sql/query db select-all-todo)})
+   :body    (jdbc/execute! db ["SELECT * FROM users ..."])})
 ```
 
-For full example check the `fx.demo.todo` namespace.
-
-### Setup
-
-When you first clone this repository, run:
-
-```sh
-lein duct setup
-```
-
-This will create files for local configuration, and prep your system for the project.
-
-## Developing
-
-To begin developing, start with a REPL.
-
-```sh
-lein repl
-```
-
-## Run demo project
-
-```sh
-lein repl
-```
-
-```clojure
-user=> (dev)
-:loaded
-```
-
-Run `go` to prep and initiate the system.
-
-```clojure
-dev=> (go)
-:initiated
-```
-
-### Testing
-
-Testing is fastest through the REPL, as you avoid environment startup time.
-
-```clojure
-dev=> (test)
-...
-```
-
-But you can also run tests through Leiningen.
-
-```sh
-lein test
-```
+For more examples check  `fx.module.stub-functions` and `fx.module.autowire-test` namespaces.

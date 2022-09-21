@@ -45,7 +45,7 @@
     (is (empty?
          (sut/collect-autowired "some-ns" {} 'my-component {:some "value"}))))
 
-  (testing "component should be added to config map"
+  (testing "component should be added to the config map"
     (let [component-val (with-meta {:some "value"} {sut/AUTOWIRED-KEY true})
           result        (sut/collect-autowired "some-ns" {} 'my-component component-val)]
       (is (contains? result :some-ns/my-component))
@@ -58,7 +58,10 @@
     (let [result (sut/find-components '(fx.module.stub-functions))]
       (is (contains? result :fx.module.stub-functions/constant-value))
       (is (= (get result :fx.module.stub-functions/constant-value)
-             (var fx.module.stub-functions/constant-value))))))
+             (var fx.module.stub-functions/constant-value)))))
+
+  (testing "for ns without autowired members should return an empty map"
+    (is (empty? (sut/find-components '(fx.module.autowire-test))))))
 
 
 (defn simple-func [num]
@@ -67,6 +70,11 @@
 
 (def simple-val
   [1 2 3])
+
+
+(defn multi-arity-func
+  ([a] (inc a))
+  ([a b] (+ a b)))
 
 
 (deftest get-comp-deps-test
@@ -79,7 +87,11 @@
     (let [result (sut/get-comp-deps (meta #'sf/status))]
       (is (vector? result))
       (is (= 1 (count result)))
-      (is (= :fx.module.stub-functions/db-connection (first result))))))
+      (is (= :fx.module.stub-functions/db-connection (first result)))))
+
+  (testing "multi-arity functions not supported"
+    (is (thrown? Exception
+                 (sut/get-comp-deps (meta #'multi-arity-func))))))
 
 
 (deftest prep-component-test
@@ -107,39 +119,41 @@
 ;; System tests
 ;; =============================================================================
 
-(def valid-config
+(def app-config
   {:duct.profile/base  {:duct.core/project-ns 'test}
    :fx.module/autowire {:root 'fx.module.stub-functions}})
 
 
 (deftest autowire-config-prep
-  (let [config (duct/prep-config valid-config)
+  (let [config (duct/prep-config app-config)
         system (ig/init config)]
 
     (testing "basic component"
-      (is (some? (:fx.module.stub-functions/health-check system)))
-      (is (= {:status :ok}
-             ((:fx.module.stub-functions/health-check system) {} {}))))
+      (let [health-check (:fx.module.stub-functions/health-check system)]
+        (is (some? health-check))
+        (is (fn? health-check))
+        (is (= {:status :ok} (health-check {} {})))))
 
     (testing "parent - child component"
-      (is (some? (get system :fx.module.stub-functions/status)))
-      (is (= {:status     :ok
-              :connection {:connected :ok}}
-             ((get system :fx.module.stub-functions/status)))))
+      (let [status (get system :fx.module.stub-functions/status)]
+        (is (some? status))
+        (is (fn? status))
+        (is (= {:status     :ok
+                :connection {:connected :ok}}
+               (status)))))
 
     (ig/halt! system)))
 
 
 (deftest autowire-di-test
-  (let [config (duct/prep-config valid-config)
+  (let [config (duct/prep-config app-config)
         system (ig/init config)]
 
     (testing "dependency injection configured properly"
       (let [status-handler-conf (get config :fx.module.stub-functions/status)
-            db-connection-conf  (:fx.module.stub-functions/db-connection config)]
-        (is (some? (:db-connection status-handler-conf)))
-        (is (ig/ref? (:db-connection status-handler-conf)))
-
+            db-connection-conf  (get config :fx.module.stub-functions/db-connection)]
+        (is (contains? status-handler-conf :db-connection))
+        (is (ig/ref? (get status-handler-conf :db-connection)))
         (is (some? db-connection-conf))
 
         (testing "components return correct results"
@@ -152,13 +166,12 @@
 
 
 (deftest autowire-parent-components
-  (let [config (duct/prep-config valid-config)
+  (let [config (duct/prep-config app-config)
         system (ig/init config)]
 
-    (testing "single parent component"
-      (is (= (->> [:fx.module.stub-functions/test :fx.module.stub-functions/parent-test-component]
-                  (get config)
-                  :component)
-             :test)))
+    (testing "when using parent components keys represented in config as composite"
+      (let [composite-key [:fx.module.stub-functions/test :fx.module.stub-functions/parent-test-component]]
+        (is (contains? config composite-key))
+        (is (= :test (get-in config [composite-key :component])))))
 
     (ig/halt! system)))

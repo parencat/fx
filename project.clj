@@ -1,6 +1,6 @@
-(defproject org.clojars.tka4enko/fx "0.1.1"
+(defproject parencat/fx "0.1.0"
   :description "Set of Duct modules for rapid clojure development"
-  :url "https://github.com/Minoro-Ltd/fx-demo"
+  :url "https://github.com/parencat/fx"
 
   :min-lein-version "2.0.0"
 

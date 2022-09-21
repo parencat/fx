@@ -22,11 +22,11 @@
 (defn find-project-namespaces
   "Will return all namespaces names as symbols from the classpath.
    Limit the number of resources by providing a pattern argument.
-   By default, namespaces will be limited to user.dir folder.
+   By default, namespaces will be limited to `user.dir` path.
    Passing nil as argument will lead to returning all namespaces."
   ([]
-   (let [full-project-path (System/getProperty "user.dir")
-         pattern           (re-find #"[^\/]+$" full-project-path)]
+   (let [project-path (System/getProperty "user.dir")
+         pattern      (re-find #"[^\/]+$" project-path)]
      (find-project-namespaces pattern)))
 
   ([pattern]
@@ -43,7 +43,9 @@
 
 
 (defn collect-autowired
-  "Assoc key value pair in the autowired map in case if value meta contains AUTOWIRED-KEY"
+  "Assoc key value pair in the autowired map
+   in case if the value metadata contains AUTOWIRED-KEY.
+   Returns autowired map."
   [ns autowired item-key item-val]
   (let [item-meta (meta item-val)]
     (if (some? (get item-meta AUTOWIRED-KEY))
@@ -56,8 +58,8 @@
 
 
 (defn find-components
-  "Given a list of namespaces traverses through all public members.
-   Returns a map containing all ns members who have AUTOWIRED-KEY meta"
+  "Given a list of namespaces will scan through all public members.
+   Returns a map containing all ns members who contain AUTOWIRED-KEY in the metadata"
   [namespaces]
   (->> (for [ns namespaces]
          (let [_         (loader/require ns)
@@ -80,10 +82,11 @@
 
 
 (defn get-comp-deps
-  "Given a function metadata map will traverse all function arguments
+  "Given a function metadata map will traverse all function arguments (:arglists)
    and collect all items which has a qualified keywords in the metadata.
    E.g. for function like (defn my-func [^:some/dependency dep] ...)
-   will return list (:some/dependency)"
+   will return a vector like [:some/dependency].
+   Doesn't support multi-arity functions atm."
   [component-meta]
   (let [arglists (:arglists component-meta)]
     (if (and (seq arglists)
@@ -97,21 +100,28 @@
 
 (m/=> get-comp-deps
   [:=> [:cat [:map [:arglists {:optional true} seq?]]]
-   [:sequential :qualified-keyword]])
+   [:vector :qualified-keyword]])
 
 
-(defn get-params-config [params-keys]
+(defn get-params-config
+  "Given a vector of function parameters names returns a configuration map
+   with integrant references.
+   E.g. [:some/dependency] => {:dependency (ig/ref :some/dependency)}"
+  [params-keys]
   (reduce (fn [acc param]
             (assoc acc (keyword (name param)) (ig/ref param)))
           {} params-keys))
 
 (m/=> get-params-config
-  [:=> [:cat [:sequential :qualified-keyword]]
+  [:=> [:cat [:vector :qualified-keyword]]
    [:map-of :keyword ig-ref]])
 
 
 (defn prep-component
-  "Creates an integrant key method and assoc this key in the resulting config"
+  "Prepare a single component. Few things required for every component:
+   1. initialize integrant methods for that component (ig/init-key, ig/halt-key!)
+   2. find component dependencies and create integrant references for them
+   3. add a component configuration to the main config map"
   [config comp-key comp-value]
   (let [comp-meta     (meta comp-value)
         halt-key      (get comp-meta HALT-KEY)
@@ -119,7 +129,6 @@
         params-keys   (get-comp-deps comp-meta)
         params-config (get-params-config params-keys)
         fn-comp?      (fn? (deref comp-value))]
-
     (cond
       (and fn-comp? (keyword? halt-key))
       (defmethod ig/halt-key! halt-key [_ init-result]
@@ -127,7 +136,8 @@
 
       fn-comp?
       (defmethod ig/init-key comp-key [_ params]
-        (let [params-values (mapv #(get params (keyword (name %))) params-keys)]
+        (let [params-values (mapv #(get params (keyword (name %))) ;; TODO include non dependencies values as well
+                                  params-keys)]
           (if wrap?
             ;; return component as anonymous function
             (fn [& args]
@@ -154,8 +164,9 @@
 
 
 (defn prep-components-config
-  "Given a list of system components will create an integrant key for each of them.
-   Returns integrant style config map for given components."
+  "Given a map of components will prepare integrant lifecycle methods
+   and configuration for each of them.
+   Returns an integrant style config map for all given components."
   [components]
   (reduce-kv
    (fn [config comp-key comp-value]
