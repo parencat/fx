@@ -48,6 +48,37 @@
     (ig/halt! system)))
 
 
+(deftest save-test
+  (let [config (duct/prep-config config)
+        system (ig/init config)]
+
+    (let [person  (val (ig/find-derived-1 system ::person))]
+      (testing "save single entity record"
+        (fx.repo/save! person {:id     (random-uuid)
+                               :column "base"
+                               :name   "user-1"})
+
+        (is (= #{"user-1"}
+               (->> (fx.repo/find-all! person)
+                    (map :name)
+                    set))))
+
+      (testing "save multiple entity records in one go"
+        (fx.repo/save! person [{:id     (random-uuid)
+                                :column "base"
+                                :name   "user-2"}
+                               {:id     (random-uuid)
+                                :column "base"
+                                :name   "user-3"}])
+
+        (is (= #{"user-1" "user-2" "user-3"}
+               (->> (fx.repo/find-all! person)
+                    (map :name)
+                    set)))))
+
+    (ig/halt! system)))
+
+
 (deftest find-test
   (let [config (duct/prep-config config)
         system (ig/init config)]

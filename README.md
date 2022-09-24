@@ -1,6 +1,6 @@
 # FX
 
-Set of Duct modules for a rapid clojure development.
+Set of Duct modules and integrant components for a rapid clojure development.
 
 ## Installation
 

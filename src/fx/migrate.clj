@@ -576,12 +576,16 @@
   "Generates and applies migrations related to entities on database
    All migrations run in a single transaction"
   [{:keys [^DataSource database entities]}]
-  (let [{:keys [migrations rollback-migrations]} (prep-migrations database entities)]
-    (jdbc/with-transaction [tx database]
-      (doseq [migration migrations]
-        (println "Running migration" migration)
-        (jdbc/execute! tx migration)))
-    {:rollback-migrations rollback-migrations}))
+  (try
+    (let [{:keys [migrations rollback-migrations]} (prep-migrations database entities)]
+      (jdbc/with-transaction [tx database]
+        (doseq [migration migrations]
+          (println "Running migration" migration)
+          (jdbc/execute! tx migration)))
+      {:rollback-migrations rollback-migrations})
+    (catch Throwable t
+      (println t)
+      (throw t))))
 
 (m/=> apply-migrations!
   [:=> [:cat [:map
