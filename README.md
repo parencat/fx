@@ -2,6 +2,9 @@
 
 Set of Duct modules and integrant components for a rapid clojure development.
 
+
+[![Clojars Project](https://img.shields.io/clojars/v/io.github.parencat/fx.svg)](https://clojars.org/io.github.parencat/fx)
+
 ## Installation
 
 Assuming you already have a Duct project bootstrapped. 
