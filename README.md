@@ -11,7 +11,7 @@ Assuming you already have a Duct project bootstrapped.
 Add to your leiningen dependencies:
 
 ```clojure
-[io.github.parencat/fx "0.1.0"]
+[io.github.parencat/fx "0.1.2"]
 ```
 
 ## Modules
