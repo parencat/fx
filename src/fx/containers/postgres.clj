@@ -12,11 +12,17 @@
   ([]
    (pg-container {}))
 
-  ([{:keys [port]
-     :or   {port 5432}}]
-   (-> (tc/init {:container     (PostgreSQLContainer. "postgres:14.2")
-                 :exposed-ports [port]})
-       (tc/start!))))
+  ([{:keys [port add-resources]
+     :or   {port          5432
+            add-resources false}}]
+   (cond-> (tc/init {:container     (PostgreSQLContainer. "postgres:14.2")
+                     :exposed-ports [port]})
+           add-resources
+           (tc/bind-filesystem! {:host-path      "resources"
+                                 :container-path "/resources"
+                                 :mode           :read-only})
+           :always
+           (tc/start!))))
 
 
 (defn stop [container]
@@ -79,23 +85,15 @@
 
  (stop pgc)
 
- (jdbc/execute-one!
-  (jdbc/get-datasource
-   {:jdbcUrl (format "%s&user=%s&password=%s"
-                     (.getJdbcUrl (:container pgc))
-                     (.getUsername (:container pgc))
-                     (.getPassword (:container pgc)))})
-  ["CREATE TABLE \"person\" (\"column\" VARCHAR NOT NULL, name VARCHAR NOT NULL, id UUID NOT NULL PRIMARY KEY)"])
 
- (jdbc/execute!
-  (jdbc/get-datasource
-   {:jdbcUrl (format "%s&user=%s&password=%s"
-                     (.getJdbcUrl (:container pgc))
-                     (.getUsername (:container pgc))
-                     (.getPassword (:container pgc)))})
-  ["SELECT *
-     FROM information_schema.columns
-     WHERE table_schema = 'public' AND table_name = 'user';"]
-  {:return-keys true})
+ (def ds
+   (jdbc/get-datasource
+    {:jdbcUrl (format "%s&user=%s&password=%s"
+                      (.getJdbcUrl (:container pgc))
+                      (.getUsername (:container pgc))
+                      (.getPassword (:container pgc)))}))
+
+ (jdbc/execute! ds [""]
+   {:return-keys true})
 
  nil)
