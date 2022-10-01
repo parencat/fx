@@ -104,8 +104,7 @@
                            (get nested ref-key)
                            {})]
     (cond
-      (or (:one-to-one? ref-props)
-          (:many-to-one? ref-props))
+      (fx.entity/required-ref? ref-props)
       (let [ref-pk           (-> (fx.entity/ident-field-schema ref-entity)
                                  key)
             entity-ref-field (keyword (format "%s.%s" table-name ref-name))
@@ -117,7 +116,7 @@
                                entity-ref-match)}
                     {:quoted true}))
 
-      (and (:one-to-many? ref-props)
+      (and (= :one-to-many (:rel-type ref-props))
            (not (:join-table ref-props)))
       (let [target-field-name (-> (fx.entity/ref-field-schema ref-entity entity)
                                   key
@@ -139,8 +138,8 @@
                      :order-by (:order-by ref-query-params))
                     {:quoted true}))
 
-      (or (:many-to-many? ref-props)
-          (and (:one-to-many? ref-props)
+      (or (= :many-to-many (:rel-type ref-props))
+          (and (= :one-to-many (:rel-type ref-props))
                (some? (:join-table ref-props))))
       (let [query-fields       (if (some? (:fields ref-query-params))
                                  (mapv #(->> % name (format "tt.%s") keyword)
@@ -214,15 +213,13 @@
   (let [temp-join-key (keyword (format "%s_%s" table-name ref-name))
         ref-props     (fx.entity/properties ref)]
     (cond
-      (or (:one-to-one? ref-props)
-          (:many-to-one? ref-props))
+      (fx.entity/required-ref? ref-props)
       (sql/format {:select [[[:row_to_json temp-join-key]]]
                    :from   [[[:nest [:raw join-query]]
                              temp-join-key]]}
                   {:quoted true})
 
-      (or (:one-to-many? ref-props)
-          (:many-to-many? ref-props))
+      (fx.entity/optional-ref? ref-props)
       (-> (sql/format {:select [[[:array_to_json [:array_agg [:row_to_json temp-join-key]]]]]
                        :from   [[[:nest [:raw join-query]]
                                  temp-join-key]]}

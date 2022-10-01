@@ -95,10 +95,10 @@
         ref-table (delay (fx.entity/ref-field-prop field-schema :table))]
     (cond-> []
             (not (:optional props)) (conj [:not nil])
-            (:identity? props) (conj [:primary-key])
+            (:identity props) (conj [:primary-key])
             (:cascade? props) (conj [:raw "on delete cascade"])
 
-            (and (:reference? props) (some? @ref-table))
+            (and (:reference props) (some? @ref-table))
             (conj [:references [:quote @ref-table]]))))
 
 (m/=> schema->column-modifiers
@@ -128,10 +128,10 @@
         ref-table (delay (fx.entity/ref-field-prop entry-schema :table))]
     (cond-> {}
             (some? (:optional props)) (assoc :optional (:optional props))
-            (:identity? props) (assoc :primary-key? true)
+            (:identity props) (assoc :primary-key? true)
             (:cascade? props) (assoc :cascade? true)
 
-            (and (:reference? props) (some? @ref-table))
+            (and (:reference props) (some? @ref-table))
             (assoc :foreign-key? @ref-table))))
 
 (m/=> schema->constraints-map

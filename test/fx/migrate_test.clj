@@ -22,20 +22,20 @@
 
 (def user-schema
   [:spec {:table "user"}
-   [:id {:identity? true} uuid?]
+   [:id {:identity true} uuid?]
    [:name [:string {:max 250}]]])
 
 
 (def modified-user-schema
   [:spec {:table "user"}
-   [:id {:identity? true} string?] ;; uuid? -> string?
+   [:id {:identity true} string?] ;; uuid? -> string?
    ; [:name [:string {:max 100}]]     ;; deleted
    [:email string?]]) ;; added
 
 
 (def modified-user-name-schema
   [:spec {:table "user"}
-   [:id {:identity? true} uuid?]])
+   [:id {:identity true} uuid?]])
 ; [:name [:string {:max 250}]]
 
 
@@ -262,7 +262,7 @@
 
 (def entity-w-wrapped-fields
   [:spec {:table "user"}
-   [:id {:identity? true} uuid?]
+   [:id {:identity true} uuid?]
    [:column {:wrap? true} [:string {:max 250}]]])
 
 
@@ -288,24 +288,24 @@
 
 (def ^{:fx/autowire :fx/entity} user
   [:spec {:table "user"}
-   [:id {:identity? true} :uuid]
+   [:id {:identity true} :uuid]
    [:name :string]])
 
 
 (def ^{:fx/autowire :fx/entity} post
   [:spec {:table "post"}
-   [:id {:identity? true} :uuid]
-   [:created-by {:many-to-one? true} ::user]
-   [:current-version {:many-to-one? true} ::post-version]
-   [:versions {:one-to-many? true} ::post-version]])
+   [:id {:identity true} :uuid]
+   [:created-by {:rel-type :many-to-one} ::user]
+   [:current-version {:rel-type :many-to-one} ::post-version]
+   [:versions {:rel-type :one-to-many} ::post-version]])
 
 
 (def ^{:fx/autowire :fx/entity} post-version
   [:spec
-   [:id {:identity? true} :uuid]
+   [:id {:identity true} :uuid]
    [:title :string]
    [:content :string]
-   [:updated-by {:one-to-one? true} ::user]])
+   [:updated-by {:rel-type :one-to-one} ::user]])
 
 
 (deftest entities-without-table-test

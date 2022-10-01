@@ -15,31 +15,31 @@
 
 (def ^{:fx/autowire :fx/entity} dumb-entity
   [:spec {:table "dumb-test"}
-   [:id {:identity? true} [:string {:max 250}]]
-   [:user {:many-to-one? true} :fx.entity-test/user]])
+   [:id {:identity true} [:string {:max 250}]]
+   [:user {:rel-type :many-to-one} :fx.entity-test/user]])
 
 
 (def ^{:fx/autowire :fx/entity} user
   [:spec {:table "user"}
-   [:id {:identity? true} uuid?]
+   [:id {:identity true} uuid?]
    [:name [:string {:max 250}]]
-   [:last-name {:optional? true} string?]
-   [:client {:many-to-one? true} :fx.entity-test/client]
-   [:role {:many-to-one? true} :fx.entity-test/role]])
+   [:last-name {:optional true} string?]
+   [:client {:rel-type :many-to-one} :fx.entity-test/client]
+   [:role {:rel-type :many-to-one} :fx.entity-test/role]])
 
 
 (def ^{:fx/autowire :fx/entity} client
   [:spec {:table "client"}
-   [:id {:identity? true} uuid?]
+   [:id {:identity true} uuid?]
    [:name [:string {:max 250}]]
-   [:user {:one-to-many? true} :fx.entity-test/user]])
+   [:user {:rel-type :one-to-many} :fx.entity-test/user]])
 
 
 (def ^{:fx/autowire :fx/entity} role
   [:spec {:table "role"}
-   [:id {:identity? true} uuid?]
+   [:id {:identity true} uuid?]
    [:name [:string {:max 250}]]
-   [:user {:one-to-many? true} :fx.entity-test/user]])
+   [:user {:rel-type :one-to-many} :fx.entity-test/user]])
 
 
 (def simple-config

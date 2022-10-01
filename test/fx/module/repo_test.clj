@@ -13,7 +13,7 @@
 
 (def ^{:fx/autowire :fx/entity} person
   [:spec {:table "person"}
-   [:id {:identity? true} :uuid]
+   [:id {:identity true} :uuid]
    [:name :string]
    [:column {:wrap? true} :string]])
 
@@ -126,16 +126,16 @@
 
 (def ^{:fx/autowire :fx/entity} user
   [:spec {:table "user"}
-   [:id {:identity? true} :uuid]
+   [:id {:identity true} :uuid]
    [:name :string]
-   [:post {:one-to-one? true} ::post]])
+   [:post {:rel-type :one-to-one} ::post]])
 
 
 (def ^{:fx/autowire :fx/entity} post
   [:spec {:table "post"}
-   [:id {:identity? true} :uuid]
+   [:id {:identity true} :uuid]
    [:title :string]
-   [:users {:one-to-many? true} ::user]])
+   [:users {:rel-type :one-to-many} ::user]])
 
 
 (deftest find-with-nested-test

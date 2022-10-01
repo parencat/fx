@@ -7,7 +7,6 @@
    [malli.error :as me]
    [malli.registry :as mr]
    [malli.transform :as mt]
-   [medley.core :as mdl]
    [fx.utils.common :as uc])
   (:import
    [clojure.lang MapEntry]))
@@ -20,9 +19,9 @@
 (def EntityRawSpec
   "Recursive malli schema to parse provided by user entities schemas e.g.
    [:spec {:table \"client\"}
-     [:id {:identity? true} uuid?]
+     [:id {:identity true} uuid?]
      [:name [:string {:max 250}]]
-     [:user {:one-to-many? true} :fx.entity-test/user]]"
+     [:user {:rel-type :one-to-many} :fx.entity-test/user]]"
   [:schema
    {:registry
     {::entity [:catn
@@ -127,7 +126,7 @@
   [schema]
   (let [[pkey pkey-val] (->> (m/entries schema {:registry entities-registry})
                              (filter (fn [[_ v]]
-                                       (-> v m/properties :identity?)))
+                                       (-> v m/properties :identity)))
                              first)
         pkey-type (-> pkey-val m/children first)]
     [:or pkey-type [:map [pkey pkey-type]]]))
@@ -196,18 +195,30 @@
 ;; =============================================================================
 
 (def required-rel-types
-  #{:one-to-one? :many-to-one?})
+  #{:one-to-one :many-to-one})
+
+
+(defn required-ref?
+  "Check if reference field is required"
+  [props]
+  (-> (and (some? props)
+           (contains? required-rel-types (:rel-type props)))
+      boolean))
+
+(m/=> required-ref?
+  [:=> [:cat [:maybe map?]]
+   :boolean])
 
 
 (def optional-rel-types
-  #{:one-to-many? :many-to-many?})
+  #{:one-to-many :many-to-many})
 
 
 (defn optional-ref?
-  "Check if some reference field is optional"
+  "Check if reference field is optional"
   [props]
   (-> (and (some? props)
-           (some props optional-rel-types))
+           (contains? optional-rel-types (:rel-type props)))
       boolean))
 
 (m/=> optional-ref?
@@ -285,7 +296,7 @@
   (let [schema (mr/schema entities-registry (or (:type entity) entity))]
     (->> (m/entries schema {:registry entities-registry})
          (filter (fn [[_ v]]
-                   (-> v m/properties :identity?)))
+                   (-> v m/properties :identity)))
          first)))
 
 (m/=> ident-field-schema
@@ -398,7 +409,7 @@
        (filter (fn [[_ v]]
                  (let [entry-schema (-> v m/children first)
                        props        (m/properties v)]
-                   (and (:reference? props)
+                   (and (:reference props)
                         (not (optional-ref? props))
                         (= (:type dependency)
                            (-> entry-schema m/properties :entity))))))
@@ -441,17 +452,12 @@
 
         {:keys [fields deps]}
         (reduce (fn [{:keys [fields deps]} {:keys [properties type] :as field}]
-                  (let [ref?          (= :entity-ref-key (-> type first))
-                        optional-prop (:optional? properties)
-                        optional-ref  (optional-ref? properties)
-                        field'        (cond-> field
-                                              ref?
-                                              (-> (assoc :type (-> type second ->ref-spec-type))
-                                                  (assoc-in [:properties :reference?] true))
-
-                                              optional-prop
-                                              (-> (assoc-in [:properties :optional] true)
-                                                  (mdl/dissoc-in [:properties :optional?])))]
+                  (let [ref?         (= :entity-ref-key (-> type first))
+                        optional-ref (optional-ref? properties)
+                        field'       (cond-> field
+                                             ref?
+                                             (-> (assoc :type (-> type second ->ref-spec-type))
+                                                 (assoc-in [:properties :reference] true)))]
                     {:fields (conj fields field')
                      :deps   (cond-> deps
                                      (and ref? (not optional-ref))
