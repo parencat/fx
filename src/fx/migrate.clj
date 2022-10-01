@@ -92,7 +92,7 @@
    e.g. [[:not nil] [:primary-key]]"
   [field-schema]
   (let [props     (fx.entity/properties field-schema)
-        ref-table (delay (fx.entity/ref-field-prop field-schema :table))]
+        ref-table (delay (fx.entity/ref-entity-prop field-schema :table))]
     (cond-> []
             (not (:optional props)) (conj [:not nil])
             (:identity props) (conj [:primary-key])
@@ -107,7 +107,7 @@
 
 
 (defn ->column-name [entity field-name]
-  (if (fx.entity/field-prop entity field-name :wrap?)
+  (if (fx.entity/entity-field-prop entity field-name :wrap?)
     [:quote field-name]
     field-name))
 
@@ -125,7 +125,7 @@
    e.g. {:optional false :primary-key? true}"
   [entry-schema]
   (let [props     (fx.entity/properties entry-schema)
-        ref-table (delay (fx.entity/ref-field-prop entry-schema :table))]
+        ref-table (delay (fx.entity/ref-entity-prop entry-schema :table))]
     (cond-> {}
             (some? (:optional props)) (assoc :optional (:optional props))
             (:identity props) (assoc :primary-key? true)
@@ -265,7 +265,7 @@
        (filter (fn [[_ field-schema]]
                  (or (not (fx.entity/ref? field-schema))
                      (let [props     (fx.entity/properties field-schema)
-                           ref-table (fx.entity/ref-field-prop field-schema :table)]
+                           ref-table (fx.entity/ref-entity-prop field-schema :table)]
                        (or (not ref-table)
                            (not (fx.entity/optional-ref? props)))))))
        (mapv (fn [[field-key schema]]
@@ -424,13 +424,51 @@
    :boolean])
 
 
+(defn get-join-table-fields
+  "Find all fields with :many-to-many relation type"
+  [entity]
+  (->> (fx.entity/entity-fields entity)
+       (filter (fn [[_ field-schema]]
+                 (let [rel-type   (fx.entity/field-prop field-schema :rel-type)
+                       join-table (fx.entity/field-prop field-schema :join-table)]
+                   (and (fx.entity/ref? field-schema)
+                        (= rel-type :many-to-many)
+                        (some? join-table)))))))
+
+(m/=> get-join-table-fields
+  [:=> [:cat fx.entity/entity?]
+   [:sequential fx.entity/entity-field-schema?]])
+
+
 (defn create-table
   "Adds two SQL commands to create DB table and to delete this table"
   [entity table migrations]
-  (let [ddl    (entity->columns-ddl entity)
-        create (create-table-ddl table ddl)
-        drop   (drop-table-ddl table)]
-    (conj migrations create drop)))
+  (let [ddl         (entity->columns-ddl entity)
+        create      (create-table-ddl table ddl)
+        drop        (drop-table-ddl table)
+        join-fields (get-join-table-fields entity)]
+    (reduce
+     (fn [acc [_ field-schema]]
+       (let [join-table     (fx.entity/field-prop field-schema :join-table)
+
+             [entity-pk entity-pk-schema] (fx.entity/ident-field-schema entity)
+             entity-pk-type (-> entity-pk-schema fx.entity/field-schema schema->column-type)
+             entity-column  (keyword (format "%s_%s" table (name entity-pk)))
+
+             ref-entity     (fx.entity/field-type-prop field-schema :entity)
+             [ref-pk ref-pk-schema] (fx.entity/ident-field-schema ref-entity)
+             ref-pk-type    (-> ref-pk-schema fx.entity/field-schema schema->column-type)
+             ref-table      (fx.entity/ref-entity-prop field-schema :table)
+             ref-column     (keyword (format "%s_%s" ref-table (name ref-pk)))
+
+             columns        [[entity-column [:inline entity-pk-type] [:references [:quote table]] [:cascade]]
+                             [ref-column [:inline ref-pk-type] [:references [:quote ref-table]] [:cascade]]
+                             [[:primary-key entity-column ref-column]]]]
+         (conj acc
+               (create-table-ddl join-table columns)
+               (drop-table-ddl join-table))))
+     (conj migrations create drop)
+     join-fields)))
 
 (m/=> create-table
   [:=> [:cat fx.entity/entity? :string vector?]
@@ -468,6 +506,18 @@
    [:vector [:vector :string]]])
 
 
+(defn has-join-table?
+  "Checks if dependency entity has a join-table property in the reference to the target entity"
+  [target dependency]
+  (if-some [field (fx.entity/ref-field-schema target dependency)]
+    (some? (fx.entity/field-prop (val field) :join-table))
+    false))
+
+(m/=> has-join-table?
+  [:=> [:cat fx.entity/entity? fx.entity/entity?]
+   :boolean])
+
+
 (defn sort-by-dependencies
   "According to dependencies between entities will sort them in the topological order"
   [entities]
@@ -475,7 +525,8 @@
         emap  (into {} (map (fn [e] [(:type e) e])) entities)]
     ;; build the graph
     (doseq [e1 entities e2 entities]
-      (if (fx.entity/depends-on? e1 e2)
+      (if (or (fx.entity/depends-on? e1 e2)
+              (has-join-table? e1 e2))
         (reset! graph (dep/depend @graph (:type e1) (:type e2)))
         (reset! graph (dep/depend @graph (:type e1) nil))))
     ;; graph -> sorted list

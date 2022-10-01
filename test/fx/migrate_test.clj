@@ -312,11 +312,9 @@
 
     (testing "entities w/o table property in spec doesn't have table in the database"
       (let [all-entities (set (map val (ig/find-derived system :fx/entity)))
-            user         (val (ig/find-derived-1 system ::user))
-            post         (val (ig/find-derived-1 system ::post))
+            post-version (val (ig/find-derived-1 system ::post-version))
             ds           (val (ig/find-derived-1 system :fx.database/connection))]
-        (is (= (sut/clean-up-entities all-entities)
-               (list user post))
+        (is (= -1 (.indexOf (sut/clean-up-entities all-entities) post-version))
             "post-version entity excluded")
 
         (is (not (sut/table-exist? ds "post_version")))))
@@ -368,5 +366,36 @@
             (is (= version-2-id (get-in result [:current-version :id])))
             (is (= user-id (get-in result [:current-version :updated-by])))))))
 
+
+    (ig/halt! system)))
+
+
+(def ^{:fx/autowire :fx/entity} student
+  [:spec {:table "student"}
+   [:id {:identity true} :uuid]
+   [:name :string]
+   [:courses {:rel-type   :many-to-many
+              :join-table "student_course"} ::course]])
+
+
+(def ^{:fx/autowire :fx/entity} course
+  [:spec {:table "course"}
+   [:id {:identity true} :uuid]
+   [:title :string]
+   [:students {:rel-type :many-to-many} ::student]])
+
+
+(deftest join-table-test
+  (let [config  (duct/prep-config config)
+        system  (ig/init config)
+
+        student (val (ig/find-derived-1 system ::student))
+        course  (val (ig/find-derived-1 system ::course))
+        ds      (val (ig/find-derived-1 system :fx.database/connection))]
+
+    (is (sut/table-exist? ds "student"))
+    (is (sut/table-exist? ds "course"))
+
+    (is (sut/table-exist? ds "student_course"))
 
     (ig/halt! system)))

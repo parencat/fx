@@ -25,7 +25,7 @@
 (defn ->column-name
   "Add quoting for table name if field spec include :wrap? flag"
   [entity field-name]
-  (if (fx.entity/field-prop entity field-name :wrap?)
+  (if (fx.entity/entity-field-prop entity field-name :wrap?)
     [:quote field-name]
     field-name))
 
@@ -97,9 +97,9 @@
   "Returns a SQL query vector to join rows from the referenced table"
   [{:keys [entity ref table-name ref-key ref-name nested]}]
   (let [ref-props        (fx.entity/properties ref)
-        ref-table        (fx.entity/ref-field-prop ref :table)
+        ref-table        (fx.entity/ref-entity-prop ref :table)
         ref-table-key    (keyword ref-table)
-        ref-entity       (fx.entity/ref-type-prop ref :entity)
+        ref-entity       (fx.entity/field-type-prop ref :entity)
         ref-query-params (if (map? nested)
                            (get nested ref-key)
                            {})]
@@ -243,7 +243,7 @@
     (->> (fx.entity/entity-fields entity)
          (filter (fn [[_ field]]
                    (and (fx.entity/ref? field)
-                        (some? (fx.entity/ref-field-prop field :table))))))
+                        (some? (fx.entity/ref-entity-prop field :table))))))
 
     (vector? nested) ;; return only listed nested records
     (let [nested-set (set nested)]
@@ -251,7 +251,7 @@
            (filter (fn [[field-key field]]
                      (and (contains? nested-set field-key)
                           (fx.entity/ref? field)
-                          (some? (fx.entity/ref-field-prop field :table)))))))
+                          (some? (fx.entity/ref-entity-prop field :table)))))))
 
     (map? nested)   ;; fine-grained control of nested entities
     (let [nested-set (set (keys nested))]
@@ -259,7 +259,7 @@
            (filter (fn [[field-key field]]
                      (and (contains? nested-set field-key)
                           (fx.entity/ref? field)
-                          (some? (fx.entity/ref-field-prop field :table)))))))
+                          (some? (fx.entity/ref-entity-prop field :table)))))))
 
     :else []))
 
@@ -305,7 +305,7 @@
   (let [refs (->> (fx.entity/entity-fields entity)
                   (filter (fn [[_ field]] (fx.entity/ref? field))))]
     (reduce (fn [rec [ref-key ref]]
-              (let [ref-entity (fx.entity/ref-type-prop ref :entity)]
+              (let [ref-entity (fx.entity/field-type-prop ref :entity)]
                 (update rec ref-key
                         (fn [field-val]
                           (cond
@@ -350,7 +350,7 @@
   [[_ field-schema]]
   (or (not (fx.entity/ref? field-schema))
       (let [props     (fx.entity/properties field-schema)
-            ref-table (fx.entity/ref-field-prop field-schema :table)]
+            ref-table (fx.entity/ref-entity-prop field-schema :table)]
         (or (not ref-table)
             (not (fx.entity/optional-ref? props))))))
 

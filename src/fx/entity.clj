@@ -321,13 +321,14 @@
 
 
 (defn ref-field-schema
-  "Get the field schema which is a reference to the specifyed type"
+  "Get the field schema which is a reference to the specified type"
   [entity target-entity]
-  (let [schema (mr/schema entities-registry (or (:type entity) entity))]
+  (let [schema (mr/schema entities-registry (or (:type entity) entity))
+        target (or (:type target-entity) target-entity)]
     (->> (m/entries schema {:registry entities-registry})
          (filter (fn [[_ v]]
-                   (= (-> v m/children first m/properties :entity)
-                      (or (:type target-entity) target-entity))))
+                   (= (some-> v m/children first m/properties :entity)
+                      target)))
          first)))
 
 (m/=> ref-field-schema
@@ -346,7 +347,7 @@
 
 
 (defn properties
-  "Get the schema properties map if presented"
+  "Get schema properties map if presented"
   [schema]
   (m/properties schema))
 
@@ -356,7 +357,7 @@
 
 
 (defn prop
-  "Get the property from entity by key"
+  "Get entity property under specified key"
   [entity prop-key]
   (let [entity-type (or (:type entity) entity)]
     (-> (mr/schema entities-registry entity-type)
@@ -382,15 +383,17 @@
     [:props [:maybe map?]]]])
 
 
-(defn field-prop [entity field-key prop-key]
+(defn entity-field-prop
+  "Get field property value of the given entity"
+  [entity field-key prop-key]
   (some-> (entity-field entity field-key)
           val
           (m/properties {:registry entities-registry})
           (get prop-key)))
 
 
-(defn ref-field-prop
-  "Get any property value from referenced field spec"
+(defn ref-entity-prop
+  "Get any property value from referenced entity by given ref field"
   [field-schema prop-key]
   (when-let [schema (some-> field-schema m/children first)]
     (let [deps-schema (some->> (m/properties schema)
@@ -400,12 +403,12 @@
           (m/properties {:registry entities-registry})
           (get prop-key)))))
 
-(m/=> ref-field-prop
+(m/=> ref-entity-prop
   [:=> [:cat field-schema? :keyword]
    :any])
 
 
-(defn ref-type-prop
+(defn field-type-prop
   "Get any field type property value"
   [field-schema prop-key]
   (when-let [schema (some-> field-schema m/children first)]
@@ -413,7 +416,19 @@
         (m/properties {:registry entities-registry})
         (get prop-key))))
 
-(m/=> ref-type-prop
+(m/=> field-type-prop
+  [:=> [:cat field-schema? :keyword]
+   :any])
+
+
+(defn field-prop
+  "Get field property value"
+  [field-schema prop-key]
+  (some-> field-schema
+          (m/properties {:registry entities-registry})
+          (get prop-key)))
+
+(m/=> field-prop
   [:=> [:cat field-schema? :keyword]
    :any])
 

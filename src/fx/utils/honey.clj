@@ -16,6 +16,12 @@
    [(str "\"" (name kw) "\"")]))
 
 
+(sql/register-fn!
+ :cascade
+ (fn [_ _]
+   [(str "ON DELETE CASCADE")]))
+
+
 (defn format-simple-expr [e context]
   (let [[sql & params] (sql/format-expr e)]
     (when (seq params)
