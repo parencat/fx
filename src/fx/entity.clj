@@ -89,16 +89,32 @@
     x))
 
 
+(def sequential-relations
+  #{:one-to-many :many-to-many})
+
+
+(def entity-ref-schema
+  (m/-simple-schema
+   (fn [{:keys [entity-ref rel-type]} _children]
+     {:type            :entity-ref
+      :pred            (fn [x]
+                         (if (contains? sequential-relations rel-type)
+                           (m/validate [:sequential entity-ref] x {:registry entities-registry})
+                           (m/validate entity-ref x {:registry entities-registry})))
+      :type-properties {:decode/string #(string->identity entity-ref %)
+                        :error/fn      (fn [error _]
+                                         (if (contains? sequential-relations rel-type)
+                                           (format "should be a sequence of items matching %s spec, was %s"
+                                                   entity-ref (:value error))
+                                           (format "should match entity spec for %s, was %s"
+                                                   entity-ref (:value error))))}})))
+
 (def registry*
   "Atom to hold malli schemas"
   (atom (merge
          (m/default-schemas)
          {:spec       (m/-map-schema)
-          :entity-ref (m/-simple-schema
-                       (fn [{:keys [entity-ref]} _]
-                         {:type            :entity-ref
-                          :pred            #(m/validate entity-ref % {:registry entities-registry})
-                          :type-properties {:decode/string #(string->identity entity-ref %)}}))})))
+          :entity-ref entity-ref-schema})))
 
 
 (def entities-registry
@@ -438,9 +454,10 @@
 ;; Entity constructor
 ;; =============================================================================
 
-(defn ->ref-spec-type [entity]
+(defn ->ref-spec-type [entity rel-type]
   (MapEntry. :ref-type [:entity-ref
                         {:entity     entity
+                         :rel-type   rel-type
                          :entity-ref (->entity-ref entity)}]))
 
 
@@ -456,7 +473,7 @@
                         optional-ref (optional-ref? properties)
                         field'       (cond-> field
                                              ref?
-                                             (-> (assoc :type (-> type second ->ref-spec-type))
+                                             (-> (assoc :type (->ref-spec-type (-> type second) (:rel-type properties)))
                                                  (assoc-in [:properties :reference] true)))]
                     {:fields (conj fields field')
                      :deps   (cond-> deps

@@ -40,13 +40,11 @@
 
 
 (defn get-columns [ds]
-  (jdbc/execute!
-   ds
-   ["SELECT *
-     FROM information_schema.columns
-     WHERE table_schema = 'public' AND table_name = 'user';"]
-   {:return-keys true
-    :builder-fn  jdbc.rs/as-unqualified-kebab-maps}))
+  (jdbc/execute! ds ["SELECT *
+                      FROM information_schema.columns
+                      WHERE table_schema = 'public' AND table_name = 'user';"]
+    {:return-keys true
+     :builder-fn  jdbc.rs/as-unqualified-kebab-maps}))
 
 
 (defn get-table-columns-names [ds]
@@ -296,7 +294,7 @@
   [:spec {:table "post"}
    [:id {:identity true} :uuid]
    [:created-by {:rel-type :many-to-one} ::user]
-   [:current-version {:rel-type :many-to-one} ::post-version]
+   [:current-version {:rel-type :one-to-one} ::post-version]
    [:versions {:rel-type :one-to-many} ::post-version]])
 
 
