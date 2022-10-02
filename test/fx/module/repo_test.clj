@@ -15,7 +15,7 @@
   [:spec {:table "person"}
    [:id {:identity true} :uuid]
    [:name :string]
-   [:column {:wrap? true} :string]])
+   [:column {:wrap true} :string]])
 
 
 (def config

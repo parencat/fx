@@ -50,3 +50,12 @@
 
 
 (sql/register-clause! :update-raw format-raw-update :update)
+
+
+(defn- format-add-column [_ spec]
+  (if (contains? #{:if-not-exists 'if-not-exists} (last spec))
+    [(str "ADD COLUMN " (sql/sql-kw :if-not-exists) " " (format-single-column (butlast spec)))]
+    [(str "ADD COLUMN " (format-single-column spec))]))
+
+
+(sql/register-clause! :add-column-raw format-add-column :add-column)

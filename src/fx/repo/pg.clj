@@ -23,9 +23,9 @@
 
 
 (defn ->column-name
-  "Add quoting for table name if field spec include :wrap? flag"
+  "Add quoting for table name if field spec include :wrap flag"
   [entity field-name]
-  (if (fx.entity/entity-field-prop entity field-name :wrap?)
+  (if (fx.entity/entity-field-prop entity field-name :wrap)
     [:quote field-name]
     field-name))
 

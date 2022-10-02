@@ -107,7 +107,7 @@
 
 
 (defn ->column-name [entity field-name]
-  (if (fx.entity/entity-field-prop entity field-name :wrap?)
+  (if (fx.entity/entity-field-prop entity field-name :wrap)
     [:quote field-name]
     field-name))
 
@@ -136,7 +136,7 @@
 
 (m/=> schema->constraints-map
   [:=> [:cat fx.entity/schema?]
-   [:map]])
+   map?])
 
 
 (defn get-entity-columns
@@ -145,6 +145,12 @@
           :name {:type string? :optional true}}"
   [entity]
   (->> (fx.entity/entity-fields entity)
+       (filter (fn [[_ field-schema]]
+                 (or (not (fx.entity/ref? field-schema))
+                     (let [props     (fx.entity/properties field-schema)
+                           ref-table (fx.entity/ref-entity-prop field-schema :table)]
+                       (or (not ref-table)
+                           (not (fx.entity/optional-ref? props)))))))
        (reduce (fn [acc [key schema]]
                  (let [column (-> {:type (-> schema fx.entity/field-schema schema->column-type)}
                                   (merge (schema->constraints-map schema)))]
@@ -176,7 +182,8 @@
 
 
 (def index-by-name
-  (partial mdl/index-by :column-name))
+  (partial mdl/index-by #(or (:column-name %)
+                             (:fkcolumn-name %))))
 
 
 (defn extract-db-columns
@@ -204,8 +211,8 @@
    [:column-size :int]
    [:nullable [:enum 0 1]]
    [:pk-name {:optional true} :string]
-   [:fkcolumn-name {:optional true} :string]
-   [:pktable-name {:optional true} :string]])
+   [:pktable-name {:optional true} :string]
+   [:fkcolumn-name {:optional true} :string]])
 
 (m/=> extract-db-columns
   [:=> [:cat connection? :string]
@@ -306,8 +313,8 @@
   (cond-> []
           (not (:optional column)) (conj [:not nil])
           (:primary-key? column) (conj [:primary-key])
-          (some? (:foreign-key? column)) (conj [:references [:raw (:foreign-key? column)]])
-          (:cascade? column) (conj [:raw "on delete cascade"])))
+          (some? (:foreign-key? column)) (conj [:references [:quote (:foreign-key? column)]])
+          (:cascade? column) (conj [:cascade])))
 
 (m/=> column->modifiers
   [:=> [:cat table-field-constraints]
@@ -328,7 +335,8 @@
            [:primary-key? true] {:add-index [:primary-key column-name]}
            [:primary-key? false] {:drop-index [:primary-key column-name]}
            [:foreign-key? ref] {:add-constraint [(str (name column) "-fk") [:foreign-key] [:references ref]]}
-           [:foreign-key? false] {:drop-constraint [(str (name column) "-fk")]}))))
+           [:foreign-key? false] {:drop-constraint [(str (name column) "-fk")]}
+           [:cascade? _] {:alter-column [column-name :set [:cascade]]}))))
    flatten))
 
 (m/=> ->set-ddl
@@ -346,7 +354,8 @@
          (match [op value]
            [:optional 0] {:alter-column [column-name :drop [:not nil]]}
            [:primary-key? 0] {:drop-index [:primary-key column-name]}
-           [:foreign-key? 0] {:drop-constraint [(str (name column) "-fk")]}))))
+           [:foreign-key? 0] {:drop-constraint [(str (name column) "-fk")]}
+           [:cascade? _] {:alter-column [column-name :set [:cascade]]}))))
    flatten))
 
 (m/=> ->constraints-drop-ddl
@@ -359,13 +368,13 @@
           (let [column (get all-columns col-name)]
             (->> (column->modifiers column)
                  (into [(->column-name entity col-name) (:type column)])
-                 (hash-map :add-column))))
+                 (hash-map :add-column-raw))))
         cols-to-add))
 
 (m/=> ->add-ddl
   [:=> [:cat fx.entity/entity? table-fields [:set :keyword]]
    [:vector
-    [:map [:add-column vector?]]]])
+    [:map [:add-column-raw vector?]]]])
 
 
 (defn ->drop-ddl [entity cols-to-delete]
@@ -440,6 +449,32 @@
    [:sequential fx.entity/entity-field-schema?]])
 
 
+(defn create-join-table
+  "Creates a pair of SQL query vectors for creating and dropping join-table respectively"
+  [entity table field-schema]
+  (let [join-table     (fx.entity/field-prop field-schema :join-table)
+
+        [entity-pk entity-pk-schema] (fx.entity/ident-field-schema entity)
+        entity-pk-type (-> entity-pk-schema fx.entity/field-schema schema->column-type)
+        entity-column  (keyword (format "%s_%s" table (name entity-pk)))
+
+        ref-entity     (fx.entity/field-type-prop field-schema :entity)
+        [ref-pk ref-pk-schema] (fx.entity/ident-field-schema ref-entity)
+        ref-pk-type    (-> ref-pk-schema fx.entity/field-schema schema->column-type)
+        ref-table      (fx.entity/ref-entity-prop field-schema :table)
+        ref-column     (keyword (format "%s_%s" ref-table (name ref-pk)))
+
+        columns        [[entity-column [:inline entity-pk-type] [:references [:quote table]] [:cascade]]
+                        [ref-column [:inline ref-pk-type] [:references [:quote ref-table]] [:cascade]]
+                        [[:primary-key entity-column ref-column]]]]
+    [(create-table-ddl join-table columns)
+     (drop-table-ddl join-table)]))
+
+(m/=> create-join-table
+  [:=> [:cat fx.entity/entity? :string fx.entity/field-schema?]
+   [:vector [:vector :string]]])
+
+
 (defn create-table
   "Adds two SQL commands to create DB table and to delete this table"
   [entity table migrations]
@@ -449,24 +484,8 @@
         join-fields (get-join-table-fields entity)]
     (reduce
      (fn [acc [_ field-schema]]
-       (let [join-table     (fx.entity/field-prop field-schema :join-table)
-
-             [entity-pk entity-pk-schema] (fx.entity/ident-field-schema entity)
-             entity-pk-type (-> entity-pk-schema fx.entity/field-schema schema->column-type)
-             entity-column  (keyword (format "%s_%s" table (name entity-pk)))
-
-             ref-entity     (fx.entity/field-type-prop field-schema :entity)
-             [ref-pk ref-pk-schema] (fx.entity/ident-field-schema ref-entity)
-             ref-pk-type    (-> ref-pk-schema fx.entity/field-schema schema->column-type)
-             ref-table      (fx.entity/ref-entity-prop field-schema :table)
-             ref-column     (keyword (format "%s_%s" ref-table (name ref-pk)))
-
-             columns        [[entity-column [:inline entity-pk-type] [:references [:quote table]] [:cascade]]
-                             [ref-column [:inline ref-pk-type] [:references [:quote ref-table]] [:cascade]]
-                             [[:primary-key entity-column ref-column]]]]
-         (conj acc
-               (create-table-ddl join-table columns)
-               (drop-table-ddl join-table))))
+       (let [[create drop] (create-join-table entity table field-schema)]
+         (conj acc create drop)))
      (conj migrations create drop)
      join-fields)))
 
@@ -475,17 +494,60 @@
    vector?])
 
 
+(defn get-join-table-columns
+  "Given a join-table field schema returns a DB like representation of its columns"
+  [entity table field-schema]
+  (let [[entity-pk entity-pk-schema] (fx.entity/ident-field-schema entity)
+        entity-pk-type (-> entity-pk-schema fx.entity/field-schema schema->column-type)
+        entity-column  (keyword (format "%s-%s" table (name entity-pk)))
+
+        ref-entity     (fx.entity/field-type-prop field-schema :entity)
+        [ref-pk ref-pk-schema] (fx.entity/ident-field-schema ref-entity)
+        ref-pk-type    (-> ref-pk-schema fx.entity/field-schema schema->column-type)
+        ref-table      (fx.entity/ref-entity-prop field-schema :table)
+        ref-column     (keyword (format "%s-%s" ref-table (name ref-pk)))]
+
+    {entity-column {:type         entity-pk-type
+                    :foreign-key? table
+                    :cascade?     true}
+     ref-column    {:type         ref-pk-type
+                    :foreign-key? ref-table
+                    :cascade?     true}}))
+
+(m/=> get-join-table-columns
+  [:=> [:cat fx.entity/entity? :string fx.entity/field-schema?]
+   table-fields])
+
+
 (defn update-table
   "Adds two SQL commands to update fields and to roll back all updates"
   [database entity table migrations]
   (let [db-columns     (get-db-columns database table)
         entity-columns (get-entity-columns entity)
+        join-fields    (get-join-table-fields entity)
         {:keys [updates rollbacks]} (prep-changes entity db-columns entity-columns)]
-    (if (some? updates)
-      (let [updates   (alter-table-ddl table updates)
-            rollbacks (alter-table-ddl table rollbacks)]
-        (conj migrations updates rollbacks))
-      migrations)))
+    (cond-> migrations
+            (not-empty updates)
+            (conj (alter-table-ddl table updates)
+                  (alter-table-ddl table rollbacks))
+
+            (not-empty join-fields)
+            (as-> ms
+                  (reduce (fn [acc [_ field-schema]]
+                            (let [join-table (fx.entity/field-prop field-schema :join-table)]
+                              (if (table-exist? database join-table)
+                                (let [db-columns     (get-db-columns database join-table)
+                                      entity-columns (get-join-table-columns entity table field-schema)
+                                      {:keys [updates rollbacks]} (prep-changes entity db-columns entity-columns)]
+                                  (if (not-empty updates)
+                                    (conj acc
+                                          (alter-table-ddl table updates)
+                                          (alter-table-ddl table rollbacks))
+                                    acc))
+
+                                (let [[create drop] (create-join-table entity table field-schema)]
+                                  (conj acc create drop)))))
+                          ms join-fields)))))
 
 (m/=> update-table
   [:=> [:cat connection? fx.entity/entity? :string vector?]

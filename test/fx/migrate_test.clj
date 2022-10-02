@@ -39,12 +39,39 @@
 ; [:name [:string {:max 250}]]
 
 
-(defn get-columns [ds]
-  (jdbc/execute! ds ["SELECT *
-                      FROM information_schema.columns
-                      WHERE table_schema = 'public' AND table_name = 'user';"]
-    {:return-keys true
-     :builder-fn  jdbc.rs/as-unqualified-kebab-maps}))
+(def address-schema
+  [:spec {:table "address"}
+   [:id {:identity true} uuid?]
+   [:user {:rel-type :one-to-many
+           :wrap     true} :some/test-user]])
+
+
+(def modified-address-schema
+  [:spec {:table "address"}
+   [:id {:identity true} uuid?]
+   [:user {:wrap       true
+           :rel-type   :many-to-many
+           :join-table "user_address"} :some/test-user]])
+
+
+(def dbl-modified-address-schema
+  [:spec {:table "address"}
+   [:id {:identity true} :string]
+   [:user {:wrap       true
+           :rel-type   :many-to-many
+           :join-table "user_address"} :some/test-user]])
+
+
+(defn get-columns
+  ([ds]
+   (get-columns ds "user"))
+  ([ds table]
+   (let [query (format "SELECT * FROM information_schema.columns
+                        WHERE table_schema = 'public' AND table_name = '%s';"
+                       table)]
+     (jdbc/execute! ds [query]
+       {:return-keys true
+        :builder-fn  jdbc.rs/as-unqualified-kebab-maps}))))
 
 
 (defn get-table-columns-names [ds]
@@ -109,14 +136,14 @@
                                {:id   {:type :uuid}
                                 :name {:type :string}})
              {:rollbacks '({:drop-column :name})
-              :updates   '({:add-column [:name :string [:not nil]]})})))
+              :updates   '({:add-column-raw [:name :string [:not nil]]})})))
 
     (testing "column deleted"
       (is (= (sut/prep-changes user
                                {:id   {:type :uuid}
                                 :name {:type :string}}
                                {:id {:type :uuid}})
-             {:rollbacks '({:add-column [:name :string [:not nil]]})
+             {:rollbacks '({:add-column-raw [:name :string [:not nil]]})
               :updates   '({:drop-column :name})})))
 
     (testing "column modified"
@@ -141,31 +168,88 @@
 
 (deftest apply-migrations-test
   (pg/with-datasource ds
-    (let [user-spec (-> user-schema entity/prepare-spec :spec)
-          entity    (entity/create-entity :some/test-user user-spec)]
+    (let [user-spec      (-> user-schema entity/prepare-spec :spec)
+          user-entity    (entity/create-entity :some/test-user user-spec)
+          address-spec   (-> address-schema entity/prepare-spec :spec)
+          address-entity (entity/create-entity :some/test-address address-spec)]
 
       (testing "table create"
         (sut/apply-migrations! {:database ds
-                                :entities #{entity}})
+                                :entities #{user-entity address-entity}})
 
         (is (sut/table-exist? ds "user"))
+        (is (sut/table-exist? ds "address"))
+
         (is (= #{"id" "name"}
-               (->> (get-columns ds)
+               (->> (get-columns ds "user")
+                    (map :column-name)
+                    set)))
+        (is (= #{"id"}
+               (->> (get-columns ds "address")
                     (map :column-name)
                     set)))))
 
     (testing "table alter"
       (let [modified-user-spec (-> modified-user-schema entity/prepare-spec :spec)
-            entity             (entity/create-entity :some/test-user modified-user-spec)]
+            user-entity        (entity/create-entity :some/test-user modified-user-spec)
+            address-spec       (-> modified-address-schema entity/prepare-spec :spec)
+            address-entity     (entity/create-entity :some/test-address address-spec)]
+
         (sut/apply-migrations! {:database ds
-                                :entities #{entity}})
+                                :entities #{user-entity address-entity}})
+
+        (let [columns   (get-columns ds "user_address")
+              id-column (mdl/find-first #(= "address_id" (:column-name %)) columns)]
+          (is (= "uuid" (:udt-name id-column))))
+
         (let [columns   (get-columns ds)
               id-column (mdl/find-first #(= "id" (:column-name %)) columns)]
           (is (= #{"id" "email"}
-                 (->> columns
-                      (map :column-name)
-                      set)))
-          (is (= "varchar" (:udt-name id-column))))))))
+                 (->> columns (map :column-name) set)))
+          (is (= "varchar" (:udt-name id-column))))
+
+        ;; won't work for now
+        ;; needs a very intelligent workaround based on
+        ;; finding all foreign key constraints, dropping them
+        ;; and recreating them back
+        ;; https://zauner.nllk.net/post/0036-change-primary-key-of-existing-postgresql-table/
+
+        ;; e.g.
+        ;; SELECT
+        ;;     tc.table_schema,
+        ;;     tc.constraint_name,
+        ;;     tc.table_name,
+        ;;     kcu.column_name,
+        ;;     ccu.table_schema AS foreign_table_schema,
+        ;;     ccu.table_name AS foreign_table_name,
+        ;;     ccu.column_name AS foreign_column_name
+        ;; FROM
+        ;;     information_schema.table_constraints AS tc
+        ;;     JOIN information_schema.key_column_usage AS kcu
+        ;;         ON tc.constraint_name = kcu.constraint_name
+        ;;         AND tc.table_schema = kcu.table_schema
+        ;;     JOIN information_schema.constraint_column_usage AS ccu
+        ;;         ON ccu.constraint_name = tc.constraint_name
+        ;;         AND ccu.table_schema = tc.table_schema
+        ;; WHERE tc.constraint_type = 'FOREIGN KEY' AND ccu.table_name ='order';
+
+        ;; and then
+        ;; ALTER TABLE "order"
+        ;; DROP CONSTRAINT order_pkey CASCADE,
+        ;; ADD PRIMARY KEY(column_i_want_to_use_as_a_pkey_now);
+
+        ;; and then recreate FKs
+        #_(testing "join table changed on owning entity changes"
+            (sut/apply-migrations! {:database ds
+                                    :entities (->> dbl-modified-address-schema
+                                                   entity/prepare-spec
+                                                   :spec
+                                                   (entity/create-entity :some/test-address)
+                                                   (conj #{}))})
+
+            (let [columns   (get-columns ds "user_address")
+                  id-column (mdl/find-first #(= "id" (:column-name %)) columns)]
+              (is (= "varchar" (:udt-name id-column)))))))))
 
 
 (deftest drop-migrations-test
@@ -257,11 +341,10 @@
     ["resources/${folder}/${name}.edn" {:folder "migrations" :name "user"}] "resources/migrations/user.edn"))
 
 
-
 (def entity-w-wrapped-fields
   [:spec {:table "user"}
    [:id {:identity true} uuid?]
-   [:column {:wrap? true} [:string {:max 250}]]])
+   [:column {:wrap true} [:string {:max 250}]]])
 
 
 (deftest wrapped-fields-test
@@ -273,7 +356,7 @@
                                {:id     {:type :uuid}
                                 :column {:type [:string 250]}})
              {:rollbacks '({:drop-column [:quote :column]})
-              :updates   '({:add-column [[:quote :column] [:string 250] [:not nil]]})})))))
+              :updates   '({:add-column-raw [[:quote :column] [:string 250] [:not nil]]})})))))
 
 
 
