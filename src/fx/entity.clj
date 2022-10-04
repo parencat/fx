@@ -140,17 +140,18 @@
   "Will return a simplified malli schema for a given entity
    Basically wil try to identify a type of primary key field"
   [schema]
-  (let [[pkey pkey-val] (->> (m/entries schema {:registry entities-registry})
-                             (filter (fn [[_ v]]
-                                       (-> v m/properties :identity)))
-                             first)
-        pkey-type (-> pkey-val m/children first)]
-    [:or pkey-type [:map [pkey pkey-type]]]))
+  (when-some [[pkey pkey-val] (->> (m/entries schema {:registry entities-registry})
+                                   (filter (fn [[_ v]]
+                                             (-> v m/properties :identity)))
+                                   first)]
+    (let [pkey-type (-> pkey-val m/children first)]
+      [:or pkey-type [:map [pkey pkey-type]]])))
 
 (m/=> ->entity-ref-schema
   [:=> [:cat entity-spec?]
-   [:tuple [:= :or] :any
-    [:tuple [:= :map] [:tuple :any :any]]]])
+   [:maybe
+    [:tuple [:= :or] :any
+     [:tuple [:= :map] [:tuple :any :any]]]]])
 
 
 (defn register-entity-ref!

@@ -96,10 +96,11 @@
     (cond-> []
             (not (:optional props)) (conj [:not nil])
             (:identity props) (conj [:primary-key])
-            (:cascade? props) (conj [:raw "on delete cascade"])
 
             (and (:reference props) (some? @ref-table))
-            (conj [:references [:quote @ref-table]]))))
+            (conj [:references [:quote @ref-table]])
+
+            (:cascade props) (conj [:cascade]))))
 
 (m/=> schema->column-modifiers
   [:=> [:cat fx.entity/schema?]
@@ -129,10 +130,11 @@
     (cond-> {}
             (some? (:optional props)) (assoc :optional (:optional props))
             (:identity props) (assoc :primary-key? true)
-            (:cascade? props) (assoc :cascade? true)
 
             (and (:reference props) (some? @ref-table))
-            (assoc :foreign-key? @ref-table))))
+            (assoc :foreign-key? @ref-table)
+
+            (:cascade props) (assoc :cascade true))))
 
 (m/=> schema->constraints-map
   [:=> [:cat fx.entity/schema?]
@@ -226,7 +228,7 @@
           (= nullable 1) (assoc :optional true)
           (some? pk-name) (assoc :primary-key? true)
           (some? fkcolumn-name) (assoc :foreign-key? pktable-name)))
-;;(:cascade? props) (assoc :cascade? true)))
+;;(:cascade props) (assoc :cascade true)))
 
 (m/=> column->constraints-map
   [:=> [:cat raw-table-field]
@@ -264,41 +266,6 @@
 ;; Migration functions
 ;; =============================================================================
 
-(defn entity->columns-ddl
-  "Converts entity spec to a list of HoneySQL vectors representing individual fields
-   e.g. [[:id :uuid [:not nil] [:primary-key]] ...]"
-  [entity]
-  (->> (fx.entity/entity-fields entity)
-       (filter (fn [[_ field-schema]]
-                 (or (not (fx.entity/ref? field-schema))
-                     (let [props     (fx.entity/properties field-schema)
-                           ref-table (fx.entity/ref-entity-prop field-schema :table)]
-                       (or (not ref-table)
-                           (not (fx.entity/optional-ref? props)))))))
-       (mapv (fn [[field-key schema]]
-               (let [column-name (->column-name entity field-key)]
-                 (-> [column-name [:inline (-> schema fx.entity/field-schema schema->column-type)]]
-                     (concat (schema->column-modifiers schema))
-                     vec))))))
-
-(m/=> entity->columns-ddl
-  [:=> [:cat fx.entity/entity?]
-   [:vector vector?]])
-
-
-(defn create-table-ddl
-  "Returns HoneySQL formatted map representing create SQL clause"
-  [table columns]
-  (sql/format {:create-table     table
-               :with-columns-raw columns}))
-
-
-(defn drop-table-ddl
-  "Returns HoneySQL formatted map representing drop SQL clause"
-  [table]
-  (sql/format {:drop-table (keyword table)} {:quoted true}))
-
-
 (defn alter-table-ddl
   "Returns HoneySQL formatted map representing alter SQL clause"
   [table changes]
@@ -314,7 +281,7 @@
           (not (:optional column)) (conj [:not nil])
           (:primary-key? column) (conj [:primary-key])
           (some? (:foreign-key? column)) (conj [:references [:quote (:foreign-key? column)]])
-          (:cascade? column) (conj [:cascade])))
+          (:cascade column) (conj [:cascade])))
 
 (m/=> column->modifiers
   [:=> [:cat table-field-constraints]
@@ -336,7 +303,7 @@
            [:primary-key? false] {:drop-index [:primary-key column-name]}
            [:foreign-key? ref] {:add-constraint [(str (name column) "-fk") [:foreign-key] [:references ref]]}
            [:foreign-key? false] {:drop-constraint [(str (name column) "-fk")]}
-           [:cascade? _] {:alter-column [column-name :set [:cascade]]}))))
+           [:cascade _] {:alter-column [column-name :set [:cascade]]}))))
    flatten))
 
 (m/=> ->set-ddl
@@ -355,7 +322,7 @@
            [:optional 0] {:alter-column [column-name :drop [:not nil]]}
            [:primary-key? 0] {:drop-index [:primary-key column-name]}
            [:foreign-key? 0] {:drop-constraint [(str (name column) "-fk")]}
-           [:cascade? _] {:alter-column [column-name :set [:cascade]]}))))
+           [:cascade _] {:alter-column [column-name :set [:cascade]]}))))
    flatten))
 
 (m/=> ->constraints-drop-ddl
@@ -416,141 +383,73 @@
     [:rollbacks [:sequential map?]]]])
 
 
-(defn has-changes?
-  "Given the simplified existing and updated fields definition
-   will return true if there's a difference between them, otherwise false"
-  [db-columns entity-columns]
-  (let [entity-fields (-> entity-columns keys set)
-        db-fields     (-> db-columns keys set)
-        common-cols   (clojure.set/intersection db-fields entity-fields)
-        [alterations deletions] (differ/diff (select-keys db-columns common-cols)
-                                             (select-keys entity-columns common-cols))]
-    (not (and (empty? alterations)
-              (empty? deletions)))))
-
-(m/=> has-changes?
-  [:=> [:cat table-fields table-fields]
-   :boolean])
-
-
-(defn get-join-table-fields
-  "Find all fields with :many-to-many relation type"
-  [entity]
-  (->> (fx.entity/entity-fields entity)
-       (filter (fn [[_ field-schema]]
-                 (let [rel-type   (fx.entity/field-prop field-schema :rel-type)
-                       join-table (fx.entity/field-prop field-schema :join-table)]
-                   (and (fx.entity/ref? field-schema)
-                        (= rel-type :many-to-many)
-                        (some? join-table)))))))
-
-(m/=> get-join-table-fields
-  [:=> [:cat fx.entity/entity?]
-   [:sequential fx.entity/entity-field-schema?]])
-
-
-(defn create-join-table
-  "Creates a pair of SQL query vectors for creating and dropping join-table respectively"
-  [entity table field-schema]
-  (let [join-table     (fx.entity/field-prop field-schema :join-table)
-
-        [entity-pk entity-pk-schema] (fx.entity/ident-field-schema entity)
-        entity-pk-type (-> entity-pk-schema fx.entity/field-schema schema->column-type)
-        entity-column  (keyword (format "%s_%s" table (name entity-pk)))
-
-        ref-entity     (fx.entity/field-type-prop field-schema :entity)
-        [ref-pk ref-pk-schema] (fx.entity/ident-field-schema ref-entity)
-        ref-pk-type    (-> ref-pk-schema fx.entity/field-schema schema->column-type)
-        ref-table      (fx.entity/ref-entity-prop field-schema :table)
-        ref-column     (keyword (format "%s_%s" ref-table (name ref-pk)))
-
-        columns        [[entity-column [:inline entity-pk-type] [:references [:quote table]] [:cascade]]
-                        [ref-column [:inline ref-pk-type] [:references [:quote ref-table]] [:cascade]]
-                        [[:primary-key entity-column ref-column]]]]
-    [(create-table-ddl join-table columns)
-     (drop-table-ddl join-table)]))
-
-(m/=> create-join-table
-  [:=> [:cat fx.entity/entity? :string fx.entity/field-schema?]
-   [:vector [:vector :string]]])
-
-
-(defn create-table
-  "Adds two SQL commands to create DB table and to delete this table"
-  [entity table migrations]
-  (let [ddl         (entity->columns-ddl entity)
-        create      (create-table-ddl table ddl)
-        drop        (drop-table-ddl table)
-        join-fields (get-join-table-fields entity)]
-    (reduce
-     (fn [acc [_ field-schema]]
-       (let [[create drop] (create-join-table entity table field-schema)]
-         (conj acc create drop)))
-     (conj migrations create drop)
-     join-fields)))
-
-(m/=> create-table
-  [:=> [:cat fx.entity/entity? :string vector?]
-   vector?])
-
-
-(defn get-join-table-columns
-  "Given a join-table field schema returns a DB like representation of its columns"
-  [entity table field-schema]
-  (let [[entity-pk entity-pk-schema] (fx.entity/ident-field-schema entity)
-        entity-pk-type (-> entity-pk-schema fx.entity/field-schema schema->column-type)
-        entity-column  (keyword (format "%s-%s" table (name entity-pk)))
-
-        ref-entity     (fx.entity/field-type-prop field-schema :entity)
-        [ref-pk ref-pk-schema] (fx.entity/ident-field-schema ref-entity)
-        ref-pk-type    (-> ref-pk-schema fx.entity/field-schema schema->column-type)
-        ref-table      (fx.entity/ref-entity-prop field-schema :table)
-        ref-column     (keyword (format "%s-%s" ref-table (name ref-pk)))]
-
-    {entity-column {:type         entity-pk-type
-                    :foreign-key? table
-                    :cascade?     true}
-     ref-column    {:type         ref-pk-type
-                    :foreign-key? ref-table
-                    :cascade?     true}}))
-
-(m/=> get-join-table-columns
-  [:=> [:cat fx.entity/entity? :string fx.entity/field-schema?]
-   table-fields])
-
-
 (defn update-table
   "Adds two SQL commands to update fields and to roll back all updates"
   [database entity table migrations]
   (let [db-columns     (get-db-columns database table)
         entity-columns (get-entity-columns entity)
-        join-fields    (get-join-table-fields entity)
         {:keys [updates rollbacks]} (prep-changes entity db-columns entity-columns)]
     (cond-> migrations
             (not-empty updates)
             (conj (alter-table-ddl table updates)
-                  (alter-table-ddl table rollbacks))
-
-            (not-empty join-fields)
-            (as-> ms
-                  (reduce (fn [acc [_ field-schema]]
-                            (let [join-table (fx.entity/field-prop field-schema :join-table)]
-                              (if (table-exist? database join-table)
-                                (let [db-columns     (get-db-columns database join-table)
-                                      entity-columns (get-join-table-columns entity table field-schema)
-                                      {:keys [updates rollbacks]} (prep-changes entity db-columns entity-columns)]
-                                  (if (not-empty updates)
-                                    (conj acc
-                                          (alter-table-ddl table updates)
-                                          (alter-table-ddl table rollbacks))
-                                    acc))
-
-                                (let [[create drop] (create-join-table entity table field-schema)]
-                                  (conj acc create drop)))))
-                          ms join-fields)))))
+                  (alter-table-ddl table rollbacks)))))
 
 (m/=> update-table
   [:=> [:cat connection? fx.entity/entity? :string vector?]
+   vector?])
+
+
+(defn entity->columns-ddl
+  "Converts entity spec to a list of HoneySQL vectors representing individual fields
+   e.g. [[:id :uuid [:not nil] [:primary-key]] ...]"
+  [entity]
+  (let [pk      (fx.entity/prop entity :identity)
+        columns (->> (fx.entity/entity-fields entity)
+                     (filter (fn [[_ field-schema]]
+                               (or (not (fx.entity/ref? field-schema))
+                                   (let [props     (fx.entity/properties field-schema)
+                                         ref-table (fx.entity/ref-entity-prop field-schema :table)]
+                                     (or (not ref-table)
+                                         (not (fx.entity/optional-ref? props)))))))
+                     (mapv (fn [[field-key schema]]
+                             (let [column-name (->column-name entity field-key)]
+                               (-> [column-name [:inline (-> schema fx.entity/field-schema schema->column-type)]]
+                                   (concat (schema->column-modifiers schema))
+                                   vec)))))]
+    (cond-> columns
+            (some? pk)
+            (conj (->> pk
+                       (into [:primary-key])
+                       vector)))))
+
+(m/=> entity->columns-ddl
+  [:=> [:cat fx.entity/entity?]
+   [:vector vector?]])
+
+
+(defn create-table-ddl
+  "Returns HoneySQL formatted map representing create SQL clause"
+  [table columns]
+  (sql/format {:create-table     table
+               :with-columns-raw columns}))
+
+
+(defn drop-table-ddl
+  "Returns HoneySQL formatted map representing drop SQL clause"
+  [table]
+  (sql/format {:drop-table (keyword table)} {:quoted true}))
+
+
+(defn create-table
+  "Adds two SQL commands to create DB table and to delete this table"
+  [entity table migrations]
+  (let [ddl    (entity->columns-ddl entity)
+        create (create-table-ddl table ddl)
+        drop   (drop-table-ddl table)]
+    (conj migrations create drop)))
+
+(m/=> create-table
+  [:=> [:cat fx.entity/entity? :string vector?]
    vector?])
 
 
@@ -568,18 +467,6 @@
    [:vector [:vector :string]]])
 
 
-(defn has-join-table?
-  "Checks if dependency entity has a join-table property in the reference to the target entity"
-  [target dependency]
-  (if-some [field (fx.entity/ref-field-schema target dependency)]
-    (some? (fx.entity/field-prop (val field) :join-table))
-    false))
-
-(m/=> has-join-table?
-  [:=> [:cat fx.entity/entity? fx.entity/entity?]
-   :boolean])
-
-
 (defn sort-by-dependencies
   "According to dependencies between entities will sort them in the topological order"
   [entities]
@@ -587,8 +474,7 @@
         emap  (into {} (map (fn [e] [(:type e) e])) entities)]
     ;; build the graph
     (doseq [e1 entities e2 entities]
-      (if (or (fx.entity/depends-on? e1 e2)
-              (has-join-table? e1 e2))
+      (if (fx.entity/depends-on? e1 e2)
         (reset! graph (dep/depend @graph (:type e1) (:type e2)))
         (reset! graph (dep/depend @graph (:type e1) nil))))
     ;; graph -> sorted list
@@ -681,6 +567,49 @@
     [:rollback-migrations [:vector [:vector :string]]]]])
 
 
+(defn has-changes?
+  "Given the simplified existing and updated fields definition
+   will return true if there's a difference between them, otherwise false"
+  [db-columns entity-columns]
+  (let [entity-fields (-> entity-columns keys set)
+        db-fields     (-> db-columns keys set)
+        common-cols   (clojure.set/intersection db-fields entity-fields)
+        [alterations deletions] (differ/diff (select-keys db-columns common-cols)
+                                             (select-keys entity-columns common-cols))]
+    (not (and (empty? alterations)
+              (empty? deletions)))))
+
+(m/=> has-changes?
+  [:=> [:cat table-fields table-fields]
+   :boolean])
+
+
+
+(def vars-matcher
+  "Regex that matches string template variables"
+  #"\$\{[^\$\{\}]+\}")
+
+
+(defn interpolate
+  "Takes a template string with ${} placeholders and a hashmap with replacement values.
+   Returns interpolated string"
+  [template replacement]
+  (str/replace template
+               vars-matcher
+               (fn [variable]
+                 (let [end      (- (count variable) 1)
+                       key-name (keyword (subs variable 2 end))]
+                   (str (get replacement key-name ""))))))
+
+(m/=> interpolate
+  [:=> [:cat :string map?]
+   :string])
+
+
+(def default-path-pattern
+  "resources/migrations/${timestamp}-${entity-ns}-${entity}.edn")
+
+
 ;; =============================================================================
 ;; Strategies
 ;; =============================================================================
@@ -719,31 +648,6 @@
 (m/=> drop-migrations!
   [:=> [:cat connection? [:vector [:vector :string]]]
    :nil])
-
-
-(def vars-matcher
-  "Regex that matches string template variables"
-  #"\$\{[^\$\{\}]+\}")
-
-
-(defn interpolate
-  "Takes a template string with ${} placeholders and a hashmap with replacement values.
-   Returns interpolated string"
-  [template replacement]
-  (str/replace template
-               vars-matcher
-               (fn [variable]
-                 (let [end      (- (count variable) 1)
-                       key-name (keyword (subs variable 2 end))]
-                   (str (get replacement key-name ""))))))
-
-(m/=> interpolate
-  [:=> [:cat :string map?]
-   :string])
-
-
-(def default-path-pattern
-  "resources/migrations/${timestamp}-${entity-ns}-${entity}.edn")
 
 
 (defn store-migrations!

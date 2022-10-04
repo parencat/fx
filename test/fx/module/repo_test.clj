@@ -52,7 +52,7 @@
   (let [config (duct/prep-config config)
         system (ig/init config)]
 
-    (let [person  (val (ig/find-derived-1 system ::person))]
+    (let [person (val (ig/find-derived-1 system ::person))]
       (testing "save single entity record"
         (fx.repo/save! person {:id     (random-uuid)
                                :column "base"

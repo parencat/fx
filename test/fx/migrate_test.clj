@@ -42,24 +42,23 @@
 (def address-schema
   [:spec {:table "address"}
    [:id {:identity true} uuid?]
-   [:user {:rel-type :one-to-many
-           :wrap     true} :some/test-user]])
+   [:users {:rel-type :one-to-many} :some/test-user]])
 
 
 (def modified-address-schema
   [:spec {:table "address"}
    [:id {:identity true} uuid?]
-   [:user {:wrap       true
-           :rel-type   :many-to-many
-           :join-table "user_address"} :some/test-user]])
+   [:users {:rel-type :many-to-many
+            :join     :some/address-users} :some/test-user]])
 
 
-(def dbl-modified-address-schema
-  [:spec {:table "address"}
-   [:id {:identity true} :string]
-   [:user {:wrap       true
-           :rel-type   :many-to-many
-           :join-table "user_address"} :some/test-user]])
+(def address-users-schema
+  [:spec {:table    "address_users"
+          :identity [:user-id :address-id]}
+   [:user-id {:rel-type :many-to-one
+              :cascade  true} :some/test-user]
+   [:address-id {:rel-type :many-to-one
+                 :cascade  true} :some/test-address]])
 
 
 (defn get-columns
@@ -190,23 +189,20 @@
                     set)))))
 
     (testing "table alter"
-      (let [modified-user-spec (-> modified-user-schema entity/prepare-spec :spec)
-            user-entity        (entity/create-entity :some/test-user modified-user-spec)
-            address-spec       (-> modified-address-schema entity/prepare-spec :spec)
-            address-entity     (entity/create-entity :some/test-address address-spec)]
+      (let [user-spec      (-> modified-user-schema entity/prepare-spec :spec)
+            user-entity    (entity/create-entity :some/test-user user-spec)
+            address-spec   (-> modified-address-schema entity/prepare-spec :spec)
+            address-entity (entity/create-entity :some/test-address address-spec)]
 
         (sut/apply-migrations! {:database ds
                                 :entities #{user-entity address-entity}})
-
-        (let [columns   (get-columns ds "user_address")
-              id-column (mdl/find-first #(= "address_id" (:column-name %)) columns)]
-          (is (= "uuid" (:udt-name id-column))))
 
         (let [columns   (get-columns ds)
               id-column (mdl/find-first #(= "id" (:column-name %)) columns)]
           (is (= #{"id" "email"}
                  (->> columns (map :column-name) set)))
           (is (= "varchar" (:udt-name id-column))))
+
 
         ;; won't work for now
         ;; needs a very intelligent workaround based on
@@ -238,18 +234,26 @@
         ;; DROP CONSTRAINT order_pkey CASCADE,
         ;; ADD PRIMARY KEY(column_i_want_to_use_as_a_pkey_now);
 
-        ;; and then recreate FKs
-        #_(testing "join table changed on owning entity changes"
-            (sut/apply-migrations! {:database ds
-                                    :entities (->> dbl-modified-address-schema
-                                                   entity/prepare-spec
-                                                   :spec
-                                                   (entity/create-entity :some/test-address)
-                                                   (conj #{}))})
+        ;; and then recreate FKs on all tables from step one
 
-            (let [columns   (get-columns ds "user_address")
-                  id-column (mdl/find-first #(= "id" (:column-name %)) columns)]
-              (is (= "varchar" (:udt-name id-column)))))))))
+        #_(testing "join table changed on owning entity changes"
+            (let [join-spec   (-> address-users-schema entity/prepare-spec :spec)
+                  join-entity (entity/create-entity :some/address-users join-spec)]
+              (sut/apply-migrations! {:database ds
+                                      :entities #{user-entity address-entity join-entity}})
+
+              (is (sut/table-exist? ds "address_users"))
+
+              (let [columns   (get-columns ds "address_users")
+                    id-column (mdl/find-first #(= "user_id" (:column-name %)) columns)]
+                (is (= "uuid" (:udt-name id-column))))
+
+              (sut/apply-migrations! {:database ds
+                                      :entities #{changed-user-entity changed-address-entity join-entity}})
+
+              (let [columns   (get-columns ds "address_users")
+                    id-column (mdl/find-first #(= "user_id" (:column-name %)) columns)]
+                (is (= "varchar" (:udt-name id-column))))))))))
 
 
 (deftest drop-migrations-test
@@ -457,28 +461,66 @@
   [:spec {:table "student"}
    [:id {:identity true} :uuid]
    [:name :string]
-   [:courses {:rel-type   :many-to-many
-              :join-table "student_course"} ::course]])
+   [:courses {:rel-type :many-to-many
+              :join     ::student-course} ::course]])
 
 
 (def ^{:fx/autowire :fx/entity} course
   [:spec {:table "course"}
    [:id {:identity true} :uuid]
    [:title :string]
-   [:students {:rel-type :many-to-many} ::student]])
+   [:students {:rel-type :many-to-many
+               :join     ::student-course} ::student]])
+
+
+(def ^{:fx/autowire :fx/entity} student-course
+  [:spec {:table    "student_course"
+          :identity [:student :course]}
+   [:student {:rel-type :many-to-one
+              :cascade  true} ::student]
+   [:course {:rel-type :many-to-one
+             :cascade  true} ::course]])
 
 
 (deftest join-table-test
-  (let [config  (duct/prep-config config)
-        system  (ig/init config)
-
-        student (val (ig/find-derived-1 system ::student))
-        course  (val (ig/find-derived-1 system ::course))
-        ds      (val (ig/find-derived-1 system :fx.database/connection))]
+  (let [config (duct/prep-config config)
+        system (ig/init config)
+        ds     (val (ig/find-derived-1 system :fx.database/connection))]
 
     (is (sut/table-exist? ds "student"))
     (is (sut/table-exist? ds "course"))
-
     (is (sut/table-exist? ds "student_course"))
+
+    (let [student        (val (ig/find-derived-1 system ::student))
+          course         (val (ig/find-derived-1 system ::course))
+          student-course (val (ig/find-derived-1 system ::student-course))
+          s-id           (random-uuid)
+          c1-id          (random-uuid)
+          c2-id          (random-uuid)]
+      (fx.repo/save! student {:id s-id :name "Student"})
+      (fx.repo/save! course {:id c1-id :title "Course 1"})
+      (fx.repo/save! course {:id c2-id :title "Course 2"})
+      (fx.repo/save! student-course {:student s-id :course c1-id})
+
+      (let [s (fx.repo/find! student {:id s-id :nested true})]
+        (is (seq (:courses s)))
+        (is (some #(= (:id %) c1-id) (:courses s))
+            "some of the courses is a saved course"))
+
+      (let [s  (fx.repo/find-all! student {:nested true})
+            cs (fx.repo/find-all! course)]
+        (is (= 1 (count s)))
+        (is (= 2 (count cs)))
+        (is (some #(= (:id %) c1-id) (-> s first :courses))
+            "some of the courses is a saved course"))
+
+      (fx.repo/save! student-course {:student s-id :course c2-id})
+
+      (let [s (fx.repo/find! student {:id s-id :nested true})]
+        (is (= #{c1-id c2-id}
+               (->> (:courses s)
+                    (map :id)
+                    set))
+            "two courses attached to student")))
 
     (ig/halt! system)))

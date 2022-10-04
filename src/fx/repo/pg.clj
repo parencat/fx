@@ -116,8 +116,7 @@
                                entity-ref-match)}
                     {:quoted true}))
 
-      (and (= :one-to-many (:rel-type ref-props))
-           (not (:join-table ref-props)))
+      (= :one-to-many (:rel-type ref-props))
       (let [target-field-name (-> (fx.entity/ref-field-schema ref-entity entity)
                                   key
                                   name)
@@ -138,24 +137,28 @@
                      :order-by (:order-by ref-query-params))
                     {:quoted true}))
 
-      (or (= :many-to-many (:rel-type ref-props))
-          (and (= :one-to-many (:rel-type ref-props))
-               (some? (:join-table ref-props))))
+      (= :many-to-many (:rel-type ref-props))
       (let [query-fields       (if (some? (:fields ref-query-params))
                                  (mapv #(->> % name (format "tt.%s") keyword)
                                        (:fields ref-query-params))
                                  [:tt.*])
+            join-entity        (:join ref-props)
+            join-table         (-> (fx.entity/prop join-entity :table)
+                                   keyword)
+            join-entity-key    (-> (fx.entity/ref-field-schema join-entity entity)
+                                   key name)
+            join-ref-key       (-> (fx.entity/ref-field-schema join-entity ref-entity)
+                                   key name)
             ref-pk             (-> (fx.entity/ident-field-schema ref-entity)
-                                   key
-                                   name)
+                                   key name)
             ref-pk-column      (keyword (format "tt.%s" ref-pk))
-            join-table         (:join-table ref-props)
-            join-ref-column    (keyword (format "jt.%s-%s" ref-table ref-pk))
+            join-ref-column    (keyword (format "jt.%s" join-ref-key))
+
             entity-pk          (-> (fx.entity/ident-field-schema entity)
                                    key
                                    name)
             entity-pk-column   (keyword (format "%s.%s" table-name entity-pk))
-            join-entity-column (keyword (format "jt.%s-%s" table-name entity-pk))
+            join-entity-column (keyword (format "jt.%s" join-entity-key))
             entity-ref-match   [:= join-entity-column entity-pk-column]]
         (sql/format (mdl/assoc-some
                      {:select query-fields

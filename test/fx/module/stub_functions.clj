@@ -36,8 +36,7 @@
 
 ;; you can hook to the halt phase by using :fx/halt key with the name of component
 (defn close-connection
-  {:fx/autowire true
-   :fx/halt     ::db-connection}
+  {:fx/autowire true :fx/halt ::db-connection}
   [connection]
   :closed)
 
