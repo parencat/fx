@@ -28,6 +28,10 @@
 (declare schema->column-type)
 
 
+(def column-type
+  [:or :keyword [:cat :keyword [:* [:or :int :string]]]])
+
+
 (def table-field-constraints
   [:map
    [:optional {:optional true} :boolean]
@@ -37,7 +41,7 @@
 (def table-field
   (mu/merge
    [:map
-    [:type [:or :keyword [:tuple :keyword :int]]]]
+    [:type column-type]]
    table-field-constraints))
 
 (def table-fields
@@ -49,32 +53,85 @@
    e.g. :my/user -> :uuid
    Type could be complex e.g. [:string 250]"
   [entity-key]
-  (let [table (fx.entity/prop entity-key :table)]
-    (if (some? table)
+  (let [table (fx.entity/prop entity-key :table)
+        enum  (fx.entity/prop entity-key :enum)]
+    (cond
+      (some? table)
       (-> entity-key
           fx.entity/ident-field-schema
           val
           fx.entity/field-schema
           schema->column-type)
+
+      (some? enum)
+      (schema->column-type {:type :enum :props enum})
+
+      :else
       (schema->column-type {:type :jsonb :props nil}))))
 
 (m/=> get-ref-type
   [:=> [:cat :qualified-keyword]
-   [:or :keyword [:tuple :keyword :int]]])
+   column-type])
+
+
+(defn ->array-type
+  "Returns supported by Postgres array type"
+  [type]
+  (case type
+    (:smallint) "int2"
+    (:int :integer 'int? 'integer?) "int4"
+    (:bigint) "int8"
+    (:real 'float?) "float4"
+    (:double 'double? :decimal :numeric 'number?) "float8"
+    (:boolean 'boolean?) "bool"
+    (:char 'char? :string 'string?) "varchar"
+    (throw (ex-info "Not supported type for array" {:type type}))))
+
+(m/=> ->array-type
+  [:=> [:cat [:or :keyword :symbol]]
+   :string])
 
 
 (defn schema->column-type
-  "Given a field type and optional properties will return a unified (simplified) type representation"
+  "Given a field type and optional properties will return a unified (simplified) type representation.
+   Few implementation notes:
+   interval with fields - only DAY, HOUR, MINUTE and SECOND supported due to conversion from Duration class
+   time with timezone doesn't really work - zone part is missed somewhere in between DB and PGDriver"
   [{:keys [type props]}]
   (match [type props]
-    [:uuid _] :uuid
-    ['uuid? _] :uuid
+    ;; uuid
+    [(:or :uuid 'uuid?) _] :uuid
 
-    [:string {:max max}] [:varchar max]
-    [:string _] :varchar
-    ['string? _] :varchar
+    ;; numeric
+    [:smallint _] :smallint
+    [:bigint _] :bigint
+    [(:or :int :integer 'int? 'integer?) _] :integer
+    [(:or :decimal :numeric 'number?) {:precision p :scale s}] [:numeric p s]
+    [(:or :decimal :numeric 'number?) {:precision p}] [:numeric p]
+    [(:or :decimal :numeric 'number?) _] :numeric
+    [(:or :real 'float?) _] :real
+    [(:or :double 'double?) _] [:double-precision]
+    [:smallserial _] :smallserial
+    [:serial _] :serial
+    [:bigserial _] :bigserial
 
+    ;; character
+    [(:or :char 'char?) {:max max}] [:char max]
+    [(:or :string 'string?) {:max max}] [:varchar max]
+    [(:or :string 'string?) _] :varchar
+
+    [(:or :boolean 'boolean?) _] :boolean
+    [:enum enum-name] (keyword enum-name)
     [:jsonb _] :jsonb
+    [:array {:of atype}] [:array (->array-type atype)]
+
+    [:timestamp _] :timestamp
+    [:timestamp-tz _] [:timestamp-tz]
+    [:date _] :date
+    [:time _] :time
+    [:time-tz _] [:time-tz]
+    [:interval {:fields fields}] [:interval fields]
+    [:interval _] :interval
 
     [:entity-ref {:entity entity-key}] (get-ref-type entity-key)
 
@@ -83,8 +140,8 @@
 (m/=> schema->column-type
   [:=> [:cat [:map
               [:type [:or :keyword :symbol]]
-              [:props [:maybe :map]]]]
-   [:or :keyword [:tuple :keyword :int]]])
+              [:props [:maybe [:or :map :string :keyword]]]]]
+   column-type])
 
 
 (defn schema->column-modifiers
@@ -453,14 +510,48 @@
    vector?])
 
 
+(defn create-enum-ddl
+  "Returns HoneySQL formatted map representing create enum SQL clause"
+  [enum values]
+  (sql/format {:create-enum enum
+               :with-values values}))
+
+
+(defn drop-enum-ddl
+  "Returns HoneySQL formatted map representing drop enum SQL clause"
+  [enum]
+  (sql/format {:drop-enum enum}))
+
+
+(defn create-enum [entity enum migrations]
+  (let [enum-values (fx.entity/prop entity :values)]
+    ;; TODO add alter type option
+    (conj migrations (create-enum-ddl enum enum-values) (drop-enum-ddl enum))))
+
+(m/=> create-enum
+  [:=> [:cat fx.entity/entity? :string vector?]
+   vector?])
+
+
 (defn entity->migration
   "Given an entity will check if some updates were introduced
    If so will return a set of SQL migrations string"
   [^DataSource database migrations entity]
-  (let [table (fx.entity/prop entity :table)]
-    (if (not (table-exist? database table))
+  (let [table (fx.entity/prop entity :table)
+        enum  (fx.entity/prop entity :enum)]
+    (cond
+      (and (some? table)
+           (not (table-exist? database table)))
       (create-table entity table migrations)
-      (update-table database entity table migrations))))
+
+      (some? table)
+      (update-table database entity table migrations)
+
+      (some? enum)
+      (create-enum entity enum migrations)
+
+      :else
+      migrations)))
 
 (m/=> entity->migration
   [:=> [:cat connection? [:vector [:vector :string]] fx.entity/entity?]
@@ -501,17 +592,23 @@
    [:sequential {:min 2 :max 2} vector?]])
 
 
-(defn has-table? [entity]
-  (some? (fx.entity/prop entity :table)))
+(def migratable-props
+  #{:table :enum})
 
-(m/=> has-table?
+
+(defn has-migration? [entity]
+  (->> (fx.entity/entity-properties entity)
+       (some #(contains? migratable-props (key %)))
+       (boolean)))
+
+(m/=> has-migration?
   [:=> [:cat fx.entity/entity?]
    :boolean])
 
 
 (defn clean-up-entities [entities]
   (->> entities
-       (filter has-table?)
+       (filter has-migration?)
        sort-by-dependencies))
 
 (m/=> clean-up-entities

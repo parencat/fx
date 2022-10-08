@@ -19,7 +19,39 @@
 (sql/register-fn!
  :cascade
  (fn [_ _]
-   [(str "ON DELETE CASCADE")]))
+   ["ON DELETE CASCADE"]))
+
+
+(sql/register-fn!
+ :double-precision
+ (fn [_ _]
+   ["double precision"]))
+
+
+(sql/register-fn!
+ :interval
+ (fn [_ [field]]
+   (if (some? field)
+     [(str "interval " field)]
+     ["interval"])))
+
+
+(sql/register-fn!
+ :timestamp-tz
+ (fn [_ _]
+   ["timestamp with time zone"]))
+
+
+(sql/register-fn!
+ :time-tz
+ (fn [_ _]
+   ["time with time zone"]))
+
+
+(sql/register-fn!
+ :array
+ (fn [_ [type]]
+   [(str type "[]")]))
 
 
 (defn format-simple-expr [e context]
@@ -59,3 +91,26 @@
 
 
 (sql/register-clause! :add-column-raw format-add-column :add-column)
+
+
+(defn- create-enum [_ x]
+  [(str "CREATE TYPE " x " AS ENUM")])
+
+
+(sql/register-clause! :create-enum create-enum :create-extension)
+
+
+(defn- with-values [_ xs]
+  [(str "("
+        (str/join ", " (map #(str "'" % "'") xs))
+        ")")])
+
+
+(sql/register-clause! :with-values with-values :create-extension)
+
+
+(defn- drop-enum [_ x]
+  [(str "DROP TYPE " x)])
+
+
+(sql/register-clause! :drop-enum drop-enum :create-extension)

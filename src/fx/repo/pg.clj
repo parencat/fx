@@ -3,6 +3,8 @@
    [next.jdbc :as jdbc]
    [next.jdbc.result-set :as jdbc.rs]
    [next.jdbc.prepare :as jdbc.prep]
+   [next.jdbc.types :refer [as-other]]
+   [next.jdbc.date-time :as jdbc.dt]
    [honey.sql :as sql]
    [integrant.core :as ig]
    [malli.core :as m]
@@ -16,10 +18,14 @@
    [clojure.string :as str])
   (:import
    [javax.sql DataSource]
-   [java.sql PreparedStatement]
-   [org.postgresql.util PGobject]
+   [java.sql PreparedStatement Time Array]
+   [org.postgresql.util PGobject PGInterval]
    [fx.entity Entity]
-   [clojure.lang IPersistentMap IPersistentVector]))
+   [clojure.lang IPersistentMap IPersistentVector]
+   [java.time Duration]))
+
+
+(jdbc.dt/read-as-local)
 
 
 (defn ->column-name
@@ -27,7 +33,7 @@
   [entity field-name]
   (if (fx.entity/entity-field-prop entity field-name :wrap)
     [:quote field-name]
-    field-name))
+    (-> field-name name (str/replace "-" "_") keyword)))
 
 (def column-name?
   [:or :keyword
@@ -36,6 +42,18 @@
 (m/=> ->column-name
   [:=> [:cat fx.entity/entity? :keyword]
    column-name?])
+
+
+;; =============================================================================
+;; Postgres Array helpers
+;; =============================================================================
+
+(extend-protocol jdbc.rs/ReadableColumn
+  Array
+  (read-column-by-label [^Array v _]
+    (vec (.getArray v)))
+  (read-column-by-index [^Array v _ _]
+    (vec (.getArray v))))
 
 
 ;; =============================================================================
@@ -87,6 +105,59 @@
     (<-pgobject v))
   (read-column-by-index [^PGobject v _2 _3]
     (<-pgobject v)))
+
+
+;; =============================================================================
+;; Postgres Time helpers
+;; =============================================================================
+
+(extend-protocol jdbc.rs/ReadableColumn
+  Time
+  (read-column-by-label [^Time v _]
+    (.toLocalTime v))
+  (read-column-by-index [^Time v _2 _3]
+    (.toLocalTime v)))
+
+
+;; =============================================================================
+;; Postgres Interval helpers
+;; =============================================================================
+
+(defn ->pg-interval
+  "Takes a Duration instance and converts it into a PGInterval
+   instance where the interval is created as a number of seconds."
+  [^Duration duration]
+  (PGInterval. 0 0
+               (.toDaysPart duration)
+               (.toHoursPart duration)
+               (.toMinutesPart duration)
+               (.toSecondsPart duration)))
+
+
+(extend-protocol jdbc.prep/SettableParameter
+  ;; Convert durations to PGIntervals before inserting into db
+  Duration
+  (set-parameter [^Duration v ^PreparedStatement s ^long i]
+    (.setObject s i (->pg-interval v))))
+
+
+(defn <-pg-interval
+  "Takes a PGInterval instance and converts it into a Duration
+   instance. Ignore sub-second units."
+  [^PGInterval interval]
+  (-> Duration/ZERO
+      (.plusSeconds (.getSeconds interval))
+      (.plusMinutes (.getMinutes interval))
+      (.plusHours (.getHours interval))
+      (.plusDays (.getDays interval))))
+
+(extend-protocol jdbc.rs/ReadableColumn
+  ;; Convert PGIntervals back to durations
+  PGInterval
+  (read-column-by-label [^PGInterval v _]
+    (<-pg-interval v))
+  (read-column-by-index [^PGInterval v _2 _3]
+    (<-pg-interval v)))
 
 
 ;; =============================================================================
@@ -239,7 +310,7 @@
 
 
 (defn get-refs-list
-  "Returns the list of ref fields. *nest* param is used to control which fields is required"
+  "Returns the list of ref fields. *nest* param is used to control which fields are required"
   [entity nested]
   (cond
     (true? nested)  ;; return all nested records
@@ -328,37 +399,18 @@
    map?])
 
 
-(defn lift-data
-  "Wraps vector or map with :lift operator to store them as json"
-  [x]
-  (if (or (vector? x)
-          (map? x))
-    [:lift x]
-    x))
-
-
-(defn lift-all
-  "Takes a collection and will lift all items in it if possible"
-  [x]
-  (mapv lift-data x))
-
-(m/=> lift-all
-  [:=> [:cat :any]
-   vector?])
-
-
-(defn simple-val-or-nested-entity
+(defn simple-val-or-nested-entity?
   "Predicate function to check if field spec refers to a simple data type
    or json field or mandatory dependency entity"
-  [[_ field-schema]]
+  [field-schema]
   (or (not (fx.entity/ref? field-schema))
       (let [props     (fx.entity/properties field-schema)
             ref-table (fx.entity/ref-entity-prop field-schema :table)]
         (or (not ref-table)
             (not (fx.entity/optional-ref? props))))))
 
-(m/=> simple-val-or-nested-entity
-  [:=> [:cat fx.entity/entity-field-schema?]
+(m/=> simple-val-or-nested-entity?
+  [:=> [:cat fx.entity/schema?]
    :boolean])
 
 
@@ -366,7 +418,7 @@
   "Collect columns names as keywords"
   [entity]
   (->> (fx.entity/entity-fields entity)
-       (filter simple-val-or-nested-entity)
+       (filter #(simple-val-or-nested-entity? (val %)))
        (mapv key)))
 
 (m/=> entity-columns
@@ -374,54 +426,103 @@
    [:vector :keyword]])
 
 
-(defn get-values
-  "Get values vector from data"
-  [data columns-fn]
-  (let [mapper (comp lift-all columns-fn)]
-    (if (map? data)
-      (vector (mapper data))
-      (mapv mapper data))))
+(defn lift-value
+  "Wraps vector or map with :lift operator to store them as json"
+  [x]
+  (if (or (vector? x) (map? x))
+    [:lift x]
+    x))
 
-(m/=> get-values
-  [:=> [:cat :any fn?]
-   [:vector vector?]])
+
+(defn prep-value
+  [field-schema v]
+  (let [enum?  (and (fx.entity/ref? field-schema)
+                    (some? (fx.entity/ref-entity-prop field-schema :enum)))
+        array? (= (-> field-schema fx.entity/field-schema :type) :array)]
+    (cond
+      enum? (as-other v)
+      array? (into-array v)
+      :else (lift-value v))))
+
+
+(defn prep-data
+  "Builds a list of columns names and respective values based on the field schema"
+  [entity data]
+  (reduce-kv
+   (fn [[columns values :as acc] k v]
+     (if-some [field (val (fx.entity/entity-field entity k))]
+       (if (simple-val-or-nested-entity? field)
+         (let [value  (prep-value field v)
+               column (->column-name entity k)]
+           [(conj columns column)
+            (conj values value)])
+         acc)
+       ;; some chunk in the data, noop
+       acc))
+   []
+   data))
+
+
+(defn prep-data-map [entity data]
+  (reduce-kv
+   (fn [acc k v]
+     (if-some [field (fx.entity/entity-field entity k)]
+       (let [field-schema (val field)]
+         (if (simple-val-or-nested-entity? field-schema)
+           (let [value  (prep-value field-schema v)
+                 column (->column-name entity k)]
+             (assoc acc column value))
+           acc))
+       ;; some chunk in the data, noop
+       acc))
+   {}
+   data))
 
 
 (defn pg-save!
   "Save record in database"
   [^DataSource database entity data]
-  ;; TODO deal with nested records (not JSON fields)
-  (let [table       (fx.entity/prop entity :table)
-        columns     (entity-columns entity) ;; TODO exclude autogenerated or default columns if no value provided
-        columns-fn  (apply juxt columns)
-        cln-columns (mapv #(->column-name entity %) columns)
-        values      (get-values data columns-fn)
-        query       (-> {:insert-into table
-                         :columns     cln-columns
-                         :values      values}
-                        (sql/format))]
+  ;; TODO deal with nested records (not JSON fields). Extract identity field if it's map
+  (let [table (fx.entity/prop entity :table)
+        [columns values] (prep-data entity data)
+        query (-> {:insert-into table
+                   :columns     columns
+                   :values      [values]}
+                  (sql/format))]
     (jdbc/execute-one! database query
       {:return-keys true
        :builder-fn  jdbc.rs/as-unqualified-kebab-maps})))
 
 (m/=> pg-save!
-  [:=> [:cat connection? fx.entity/entity? [:or map? [:vector map?]]]
+  [:=> [:cat connection? fx.entity/entity? map?]
    map?])
+
+
+(defn pg-save-all!
+  "Save records in database"
+  [^DataSource database entity data]
+  (jdbc/with-transaction [tx database]
+    (mapv (fn [record]
+            (pg-save! tx entity record))
+          data)))
+
+(m/=> pg-save-all!
+  [:=> [:cat connection? fx.entity/entity? vector?]
+   vector?])
 
 
 (defn pg-update!
   "Update record in database"
   [^DataSource database entity data {:keys [where] :as params}]
   (let [table        (fx.entity/prop entity :table)
-        columns      (entity-columns entity)
-        eq-clauses   (some-> (select-keys params columns)
+        eq-clauses   (some-> (prep-data-map entity params)
                              (not-empty)
                              (sql/map=))
         where-clause (if (some? eq-clauses)
                        [:and where eq-clauses]
                        where)
         query        (-> {:update-raw [:quote table]
-                          :set        (update-vals data lift-data)
+                          :set        (prep-data-map entity data)
                           :where      where-clause}
                          (sql/format))]
     (jdbc/execute-one! database query
@@ -437,16 +538,15 @@
   "Delete record from database"
   [^DataSource database entity {:keys [where] :as params}]
   (let [table        (fx.entity/prop entity :table)
-        columns      (entity-columns entity)
-        eq-clauses   (some-> (select-keys params columns)
+        eq-clauses   (some-> (prep-data-map entity params)
                              (not-empty)
                              (sql/map=))
         where-clause (if (some? eq-clauses)
                        [:and where eq-clauses]
                        where)
-        query        (-> {:delete-from (keyword table)
-                          :where       where-clause}
-                         (sql/format {:quoted true}))]
+        query        (sql/format
+                      {:delete-from (keyword table)
+                       :where       where-clause})]
     (jdbc/execute-one! database query
       {:return-keys true
        :builder-fn  jdbc.rs/as-unqualified-kebab-maps})))
@@ -459,8 +559,7 @@
 (defn pg-find!
   "Get single record from the database"
   [^DataSource database entity {:keys [fields where nested] :as params}] ;; TODO add exclude parameter to filter fields
-  (let [columns    (entity-columns entity)
-        eq-clauses (some-> (select-keys params columns)
+  (let [eq-clauses (some-> (prep-data-map entity params)
                            (not-empty)
                            (sql/map=))
         where-map  {:where (if (some? eq-clauses)
@@ -488,8 +587,7 @@
 (defn pg-find-all!
   "Return multiple records from the database"
   [^DataSource database entity {:keys [fields where order-by limit offset nested] :as params}]
-  (let [columns    (entity-columns entity)
-        eq-clauses (some-> (select-keys params columns)
+  (let [eq-clauses (some-> (prep-data-map entity params)
                            (not-empty)
                            (sql/map=))
         rest-map   (mdl/assoc-some
@@ -547,6 +645,9 @@
     Entity
     (save! [entity data]
       (pg-save! database entity data))
+
+    (save-all! [entity data]
+      (pg-save-all! database entity data))
 
     (update! [entity data params]
       (pg-update! database entity data params))

@@ -64,12 +64,12 @@
                     set))))
 
       (testing "save multiple entity records in one go"
-        (fx.repo/save! person [{:id     (random-uuid)
-                                :column "base"
-                                :name   "user-2"}
-                               {:id     (random-uuid)
-                                :column "base"
-                                :name   "user-3"}])
+        (fx.repo/save-all! person [{:id     (random-uuid)
+                                    :column "base"
+                                    :name   "user-2"}
+                                   {:id     (random-uuid)
+                                    :column "base"
+                                    :name   "user-3"}])
 
         (is (= #{"user-1" "user-2" "user-3"}
                (->> (fx.repo/find-all! person)

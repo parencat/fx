@@ -20,3 +20,4 @@ profiles.clj
 .clj-kondo/*
 !.clj-kondo/config.edn
 demos/todo/.clj-kondo
+.portal

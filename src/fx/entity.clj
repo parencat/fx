@@ -7,7 +7,8 @@
    [malli.error :as me]
    [malli.registry :as mr]
    [malli.transform :as mt]
-   [fx.utils.common :as uc])
+   [fx.utils.common :as uc]
+   [fx.utils.types :as types])
   (:import
    [clojure.lang MapEntry]))
 
@@ -35,7 +36,7 @@
      ::type   [:altn
                [:fn-schema fn?]
                [:type simple-keyword?]
-               [:type-with-props [:tuple :keyword map?]]
+               [:type-with-props [:tuple [:or :keyword fn?] map?]]
                [:entity-ref-key :qualified-keyword]]}}
    ::entity])
 
@@ -66,7 +67,7 @@
                            [:map
                             [:entity :qualified-keyword]
                             [:entity-ref :qualified-keyword]]]]
-               [:type-with-props [:tuple :keyword map?]]]}}
+               [:type-with-props [:tuple [:or :keyword fn?] map?]]]}}
    ::entity])
 
 
@@ -113,8 +114,27 @@
   "Atom to hold malli schemas"
   (atom (merge
          (m/default-schemas)
-         {:spec       (m/-map-schema)
-          :entity-ref entity-ref-schema})))
+         {:spec         (m/-map-schema)
+          :entity-ref   entity-ref-schema
+          :smallint     types/smallint
+          :bigint       types/bigint
+          :integer      types/integer
+          :decimal      types/decimal
+          :numeric      types/numeric
+          :real         types/real
+          :double       types/double
+          :smallserial  types/smallserial
+          :serial       types/serial
+          :bigserial    types/bigserial
+          :char         types/char
+          :jsonb        types/jsonb
+          :timestamp    types/timestamp
+          :timestamp-tz types/timestamp-tz
+          :date         types/date
+          :time         types/time
+          :time-tz      types/time-tz
+          :interval     types/interval
+          :array        types/array})))
 
 
 (def entities-registry
@@ -354,6 +374,18 @@
 
 (m/=> properties
   [:=> [:cat schema?]
+   [:maybe map?]])
+
+
+(defn entity-properties
+  "Get schema properties map if presented from entity record"
+  [entity]
+  (let [entity-type (or (:type entity) entity)]
+    (-> (mr/schema entities-registry entity-type)
+        (m/properties {:registry entities-registry}))))
+
+(m/=> entity-properties
+  [:=> [:cat entity?]
    [:maybe map?]])
 
 
