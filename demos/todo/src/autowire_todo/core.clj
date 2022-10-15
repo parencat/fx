@@ -13,33 +13,25 @@
    [java.sql Connection]))
 
 
-(defonce ids*
-  (atom 1))
-
-
-(def db-uri
-  "jdbc:sqlite::memory:")
-
-
 ;; =============================================================================
 ;; db connection
 ;; =============================================================================
 
-(defn close-connection [^Connection connection]
-  (.close connection))
-
-(def ^{:fx/autowire true
-       :fx/halt     close-connection}
-  db-connection
+(defn ^:fx/autowire db-connection [{:keys [db-uri]}]
   (jdbc/get-connection {:connection-uri db-uri
                         :dbtype         "sqlite"}))
+
+
+(defn ^:fx/autowire close-connection {:fx/halt ::db-connection}
+  [^Connection connection]
+  (.close connection))
 
 
 ;; =============================================================================
 ;; business logic
 ;; =============================================================================
 
-(def todo-table
+(def create-todo-table-query
   (sql/format {:create-table :todo
                :with-columns
                [[:id :int [:not nil]]
@@ -47,73 +39,67 @@
                 [:done :boolean [:not nil false]]]}))
 
 
-(defn insert-todo [title]
+(defn insert-query [title]
   (let [id (swap! ids* inc)]
     (sql/format {:insert-into :todo
                  :values      [[id title false]]})))
 
 
-(def select-all-todo
+(def select-all-query
   (sql/format {:select :*
                :from   :todo}))
 
 
-(defn update-todo [id done]
+(defn update-query [id done]
   (sql/format {:update :todo
                :set    {:done done}
                :where  [:= :id id]}))
+
+
+(defn done? [status]
+  (get {"true" true "false" false} status))
 
 
 ;; =============================================================================
 ;; http handlers
 ;; =============================================================================
 
-(defn create-table
-  {:fx/autowire true}
+(defn ^:fx/autowire create-table
   [^::db-connection db]
-  (jdbc/execute! db todo-table))
+  (jdbc/execute! db create-todo-table-query))
 
 
-(defn select-all-todo-handler
-  {:fx/autowire true
-   :fx/wrap     true}
-  [^::db-connection db _request-params]
-  {:status  200
-   :headers {"Content-Type" "application/json"}
-   :body    (jdbc.sql/query db select-all-todo)})
+(defn ^:fx/autowire select-all-todos {:fx/wrap true}
+  [^::db-connection db _]
+  {:status 200
+   :body   (jdbc.sql/query db select-all-query)})
 
 
-(defn update-todo-handler
-  {:fx/autowire true
-   :fx/wrap     true}
+(defn ^:fx/autowire update-todo {:fx/wrap true}
   [^::db-connection db {:strs [id done]}]
-  {:status  200
-   :headers {"Content-Type" "application/json"}
-   :body    (jdbc/execute! db (update-todo id (get {"true" true "false" false} done)))})
+  {:status 200
+   :body   (->> (update-query id (done? done))
+                (jdbc/execute! db))})
 
 
-(defn insert-todo-handler
-  {:fx/autowire true
-   :fx/wrap     true}
+(defn ^:fx/autowire insert-todo {:fx/wrap true}
   [^::db-connection db {:strs [title]}]
-  {:status  200
-   :headers {"Content-Type" "application/json"}
-   :body    (jdbc/execute! db (insert-todo title))})
+  {:status 200
+   :body   (jdbc/execute! db (insert-query title))})
 
 
 ;; =============================================================================
 ;; routes
 ;; =============================================================================
 
-(defn routes
-  {:fx/autowire true}
-  [^::select-all-todo-handler select-all-todo-handler
-   ^::update-todo-handler update-todo-handler
-   ^::insert-todo-handler insert-todo-handler]
+(defn ^:fx/autowire routes
+  [^::select-all-todos select-all
+   ^::update-todo update
+   ^::insert-todo insert]
   (compojure/routes
-   (compojure/GET "/todos" [] select-all-todo-handler)
-   (compojure/POST "/todos" {:keys [query-params]} (insert-todo-handler query-params))
-   (compojure/PUT "/todos" {:keys [query-params]} (update-todo-handler query-params))
+   (compojure/GET "/todos" [] select-all)
+   (compojure/POST "/todos" {:keys [query-params]} (insert query-params))
+   (compojure/PUT "/todos" {:keys [query-params]} (update query-params))
    (route/not-found "<h1>Page not found</h1>")))
 
 
@@ -121,9 +107,7 @@
 ;; http server
 ;; =============================================================================
 
-(defn server
-  {:fx/autowire true}
-  [^::routes app]
+(defn ^:fx/autowire server [^::routes app]
   (jetty/run-jetty
    (-> app
        (params/wrap-params)
@@ -132,9 +116,7 @@
     :join? false}))
 
 
-(defn stop-server
-  {:fx/autowire true
-   :fx/halt     ::server}
+(defn ^:fx/autowire stop-server {:fx/halt ::server}
   [^Server jetty-server]
   (.stop jetty-server))
 

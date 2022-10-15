@@ -58,8 +58,8 @@
   (:component config))
 
 ;; create a new instance of a ::test component (aka parent child hierarchy)
-;; component key will look like [:fx.module.stub-functions/test :fx.module.stub-functions/parent-test-component]
-;; it doesn't makes sense to define such component as functions
+;; component key will look like [:fx.module.stub-functions/test :fx.module.stub-functions/child-test-component]
+;; it doesn't make sense to define such component as functions
 ;; will work only for vars
-(def ^{:fx/autowire ::test} parent-test-component
+(def ^{:fx/autowire ::test} child-test-component
   {:component :test})

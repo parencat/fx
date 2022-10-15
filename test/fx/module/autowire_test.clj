@@ -170,7 +170,7 @@
         system (ig/init config)]
 
     (testing "when using parent components keys represented in config as composite"
-      (let [composite-key [:fx.module.stub-functions/test :fx.module.stub-functions/parent-test-component]]
+      (let [composite-key [:fx.module.stub-functions/test :fx.module.stub-functions/child-test-component]]
         (is (contains? config composite-key))
         (is (= :test (get-in config [composite-key :component])))))
 
