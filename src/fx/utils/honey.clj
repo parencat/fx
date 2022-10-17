@@ -93,6 +93,15 @@
 (sql/register-clause! :add-column-raw format-add-column :add-column)
 
 
+(defn- format-alter-column [_ spec]
+  (if (contains? #{:if-not-exists 'if-not-exists} (last spec))
+    [(str "ALTER COLUMN " (sql/sql-kw :if-not-exists) " " (format-single-column (butlast spec)))]
+    [(str "ALTER COLUMN " (format-single-column spec))]))
+
+
+(sql/register-clause! :alter-column-raw format-alter-column :alter-column)
+
+
 (defn- create-enum [_ x]
   [(str "CREATE TYPE " x " AS ENUM")])
 

@@ -149,7 +149,8 @@
    e.g. [[:not nil] [:primary-key]]"
   [field-schema]
   (let [props     (fx.entity/properties field-schema)
-        ref-table (delay (fx.entity/ref-entity-prop field-schema :table))]
+        ref-table (delay (fx.entity/ref-entity-prop field-schema :table))
+        default   (:default props)]
     (cond-> []
             (not (:optional props)) (conj [:not nil])
             (:identity props) (conj [:primary-key])
@@ -157,6 +158,7 @@
             (and (:reference props) (some? @ref-table))
             (conj [:references [:quote @ref-table]])
 
+            (some? default) (conj [:default default])
             (:cascade props) (conj [:cascade]))))
 
 (m/=> schema->column-modifiers
@@ -183,7 +185,8 @@
    e.g. {:optional false :primary-key? true}"
   [entry-schema]
   (let [props     (fx.entity/properties entry-schema)
-        ref-table (delay (fx.entity/ref-entity-prop entry-schema :table))]
+        ref-table (delay (fx.entity/ref-entity-prop entry-schema :table))
+        default   (:default props)]
     (cond-> {}
             (some? (:optional props)) (assoc :optional (:optional props))
             (:identity props) (assoc :primary-key? true)
@@ -191,6 +194,7 @@
             (and (:reference props) (some? @ref-table))
             (assoc :foreign-key? @ref-table)
 
+            (some? default) (assoc :default default)
             (:cascade props) (assoc :cascade true))))
 
 (m/=> schema->constraints-map
@@ -278,13 +282,23 @@
    [:map-of :string raw-table-field]])
 
 
+(defn extract-default-val
+  "Parse column definition and return a default value"
+  [column-def]
+  (let [default (re-find #"[^::]+" column-def)]
+    (if (str/starts-with? default "'")
+      (subs default 1 (- (count default) 1))
+      default)))
+
+
 (defn column->constraints-map
   "Convert table field map to field constraints map"
-  [{:keys [nullable pk-name fkcolumn-name pktable-name]}]
+  [{:keys [nullable pk-name fkcolumn-name pktable-name column-def]}]
   (cond-> {}
           (= nullable 1) (assoc :optional true)
           (some? pk-name) (assoc :primary-key? true)
-          (some? fkcolumn-name) (assoc :foreign-key? pktable-name)))
+          (some? fkcolumn-name) (assoc :foreign-key? pktable-name)
+          (some? column-def) (assoc :default (extract-default-val column-def))))
 ;;(:cascade props) (assoc :cascade true)))
 
 (m/=> column->constraints-map
@@ -338,7 +352,8 @@
           (not (:optional column)) (conj [:not nil])
           (:primary-key? column) (conj [:primary-key])
           (some? (:foreign-key? column)) (conj [:references [:quote (:foreign-key? column)]])
-          (:cascade column) (conj [:cascade])))
+          (:cascade column) (conj [:cascade])
+          (some? (:default column)) (conj [:default (:default column)])))
 
 (m/=> column->modifiers
   [:=> [:cat table-field-constraints]
@@ -360,7 +375,8 @@
            [:primary-key? false] {:drop-index [:primary-key column-name]}
            [:foreign-key? ref] {:add-constraint [(str (name column) "-fk") [:foreign-key] [:references ref]]}
            [:foreign-key? false] {:drop-constraint [(str (name column) "-fk")]}
-           [:cascade _] {:alter-column [column-name :set [:cascade]]}))))
+           [:cascade _] {:alter-column [column-name :set [:cascade]]}
+           [:default default] {:alter-column-raw [column-name :set [:default default]]}))))
    flatten))
 
 (m/=> ->set-ddl
@@ -379,7 +395,8 @@
            [:optional 0] {:alter-column [column-name :drop [:not nil]]}
            [:primary-key? 0] {:drop-index [:primary-key column-name]}
            [:foreign-key? 0] {:drop-constraint [(str (name column) "-fk")]}
-           [:cascade _] {:alter-column [column-name :set [:cascade]]}))))
+           [:cascade _] {:alter-column [column-name :set [:cascade]]}
+           [:default 0] {:alter-column [column-name :drop [:default]]}))))
    flatten))
 
 (m/=> ->constraints-drop-ddl

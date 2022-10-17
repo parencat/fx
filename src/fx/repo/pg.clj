@@ -457,7 +457,7 @@
            [(conj columns column)
             (conj values value)])
          acc)
-       ;; some chunk in the data, noop
+       ;; some junk in the data, noop
        acc))
    []
    data))
@@ -473,7 +473,7 @@
                  column (->column-name entity k)]
              (assoc acc column value))
            acc))
-       ;; some chunk in the data, noop
+       ;; some junk in the data, noop
        acc))
    {}
    data))
