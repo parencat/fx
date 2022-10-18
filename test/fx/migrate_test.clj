@@ -111,7 +111,7 @@
       (is (contains? result :id))
       (is (contains? result :name))
 
-      (is (= {:id        {:type :uuid :primary-key? true}
+      (is (= {:id        {:type :uuid :primary-key true}
               :last-name {:type :varchar :optional true}
               :name      {:type [:varchar 250]}}
              result)))))
@@ -121,7 +121,7 @@
   (let [user-spec (-> user-schema entity/prepare-spec :spec)
         user      (entity/create-entity :some/test-user user-spec)
         result    (sut/get-entity-columns user)]
-    (is (= {:id   {:type :uuid :primary-key? true}
+    (is (= {:id   {:type :uuid :primary-key true}
             :name {:type [:varchar 250]}}
            result))))
 
@@ -148,7 +148,7 @@
     (testing "column modified"
       (is (= (sut/prep-changes user
                                {:id {:type :uuid :optional true}}
-                               {:id {:type :string :primary-key? true}})
+                               {:id {:type :string :primary-key true}})
              {:rollbacks '({:drop-index [:primary-key :id]}
                            {:alter-column [:id :type :uuid]}
                            {:alter-column [:id :set [:not nil]]})

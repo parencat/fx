@@ -12,14 +12,14 @@
 
 (def ^{:fx/autowire :fx/entity} todo
   [:spec {:table "todo"}
-   [:id {:primary-key? true} uuid?]
+   [:id {:primary-key true} uuid?]
    [:title :string]
    [:list {:rel-type :many-to-one} ::todo-list]])
 
 
 (def ^{:fx/autowire :fx/entity} todo-list
   [:spec {:table "todo_list"}
-   [:id {:primary-key? true} uuid?]
+   [:id {:primary-key true} uuid?]
    [:name [:string {:max 250}]]
    [:todos {:rel-type :one-to-many} ::todo]
    [:person {:rel-type :many-to-one} ::person]])
@@ -27,7 +27,7 @@
 
 (def ^{:fx/autowire :fx/entity} person
   [:spec {:table "person"}
-   [:id {:primary-key? true} uuid?]
+   [:id {:primary-key true} uuid?]
    [:name [:string {:max 250}]]
    [:email [:string {:max 250}]]
    [:lists {:rel-type :one-to-many} ::todo-list]])

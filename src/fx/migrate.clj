@@ -35,8 +35,8 @@
 (def table-field-constraints
   [:map
    [:optional {:optional true} :boolean]
-   [:primary-key? {:optional true} :boolean]
-   [:foreign-key? {:optional true} :string]])
+   [:primary-key {:optional true} :boolean]
+   [:foreign-key {:optional true} :string]])
 
 (def table-field
   (mu/merge
@@ -144,25 +144,29 @@
    column-type])
 
 
+(defn ->constraint-name [table column constraint]
+  (let [valid-column-name (-> column name (str/replace "-" "_"))]
+    (format "%s_%s_%s" table valid-column-name constraint)))
+
+
 (defn schema->column-modifiers
   "Given an entity schema will return a vector of SQL field constraints, shaped as HoneySQL clauses
    e.g. [[:not nil] [:primary-key]]"
-  [field-schema]
-  (let [props     (fx.entity/properties field-schema)
-        ref-table (delay (fx.entity/ref-entity-prop field-schema :table))
-        default   (:default props)]
+  [entity field-key field-schema]
+  (let [{:keys [default optional identity reference unique cascade]}
+        (fx.entity/properties field-schema)
+        table     (fx.entity/prop entity :table)
+        ref-table (delay (fx.entity/ref-entity-prop field-schema :table))]
     (cond-> []
-            (not (:optional props)) (conj [:not nil])
-            (:identity props) (conj [:primary-key])
-
-            (and (:reference props) (some? @ref-table))
-            (conj [:references [:quote @ref-table]])
-
+            (not optional) (conj [:not nil])
             (some? default) (conj [:default default])
-            (:cascade props) (conj [:cascade]))))
+            unique (conj [:named-constraint (->constraint-name table field-key "unique") [:unique]])
+            identity (conj [:primary-key])
+            (and reference (some? @ref-table)) (conj [:references [:quote @ref-table]])
+            cascade (conj [:cascade]))))
 
 (m/=> schema->column-modifiers
-  [:=> [:cat fx.entity/schema?]
+  [:=> [:cat fx.entity/entity? :keyword fx.entity/schema?]
    [:vector vector?]])
 
 
@@ -182,20 +186,19 @@
 
 (defn schema->constraints-map
   "Converts entity field spec to a map of fields constraints
-   e.g. {:optional false :primary-key? true}"
+   used primarily for diffing states
+   e.g. {:optional false :primary-key true}"
   [entry-schema]
-  (let [props     (fx.entity/properties entry-schema)
-        ref-table (delay (fx.entity/ref-entity-prop entry-schema :table))
-        default   (:default props)]
+  (let [{:keys [default optional identity reference unique cascade]}
+        (fx.entity/properties entry-schema)
+        ref-table (delay (fx.entity/ref-entity-prop entry-schema :table))]
     (cond-> {}
-            (some? (:optional props)) (assoc :optional (:optional props))
-            (:identity props) (assoc :primary-key? true)
-
-            (and (:reference props) (some? @ref-table))
-            (assoc :foreign-key? @ref-table)
-
+            (some? optional) (assoc :optional optional)
+            unique (assoc :unique true)
+            identity (assoc :primary-key true)
             (some? default) (assoc :default default)
-            (:cascade props) (assoc :cascade true))))
+            (and reference (some? @ref-table)) (assoc :foreign-key @ref-table)
+            cascade (assoc :cascade true))))
 
 (m/=> schema->constraints-map
   [:=> [:cat fx.entity/schema?]
@@ -204,7 +207,7 @@
 
 (defn get-entity-columns
   "Given an entity will return a simplified representation of its fields as Clojure map
-   e.g. {:id    {:type uuid?   :optional false :primary-key? true}
+   e.g. {:id    {:type uuid?   :optional false :primary-key true}
           :name {:type string? :optional true}}"
   [entity]
   (->> (fx.entity/entity-fields entity)
@@ -265,14 +268,20 @@
         foreign-keys               (-> metadata
                                        (.getImportedKeys nil nil table)
                                        (rs/datafiable-result-set database {:builder-fn rs/as-unqualified-kebab-maps})
+                                       index-by-name)
+        unique-keys                (-> metadata
+                                       (.getIndexInfo nil nil table true false)
+                                       (rs/datafiable-result-set database {:builder-fn rs/as-unqualified-kebab-maps})
                                        index-by-name)]
-    (mdl/deep-merge columns primary-keys foreign-keys)))
+    (mdl/deep-merge columns primary-keys foreign-keys unique-keys)))
 
 (def raw-table-field
   [:map
    [:type-name :string]
    [:column-size :int]
    [:nullable [:enum 0 1]]
+   [:column-def [:maybe :string]]
+   [:non-unique {:optional true} :boolean]
    [:pk-name {:optional true} :string]
    [:pktable-name {:optional true} :string]
    [:fkcolumn-name {:optional true} :string]])
@@ -293,12 +302,15 @@
 
 (defn column->constraints-map
   "Convert table field map to field constraints map"
-  [{:keys [nullable pk-name fkcolumn-name pktable-name column-def]}]
+  [{:keys [nullable pk-name fkcolumn-name pktable-name column-def non-unique]}]
   (cond-> {}
           (= nullable 1) (assoc :optional true)
-          (some? pk-name) (assoc :primary-key? true)
-          (some? fkcolumn-name) (assoc :foreign-key? pktable-name)
-          (some? column-def) (assoc :default (extract-default-val column-def))))
+          (some? pk-name) (assoc :primary-key true)
+          (some? fkcolumn-name) (assoc :foreign-key pktable-name)
+          (string? column-def) (assoc :default (extract-default-val column-def))
+          (and (some? non-unique)
+               (not (some? pk-name)))
+          (assoc :unique (not non-unique))))
 ;;(:cascade props) (assoc :cascade true)))
 
 (m/=> column->constraints-map
@@ -347,37 +359,43 @@
 
 (defn column->modifiers
   "Converts field to HoneySQL vector definition"
-  [column]
-  (cond-> []
-          (not (:optional column)) (conj [:not nil])
-          (:primary-key? column) (conj [:primary-key])
-          (some? (:foreign-key? column)) (conj [:references [:quote (:foreign-key? column)]])
-          (:cascade column) (conj [:cascade])
-          (some? (:default column)) (conj [:default (:default column)])))
+  [entity col-name column]
+  (let [{:keys [optional default unique primary-key foreign-key cascade]} column
+        table (fx.entity/prop entity :table)]
+    (cond-> []
+            (not optional) (conj [:not nil])
+            (some? default) (conj [:default default])
+            (true? unique) (conj [:named-constraint (->constraint-name table col-name "unique") [:unique]])
+            primary-key (conj [:primary-key])
+            (some? foreign-key) (conj [:references [:quote foreign-key]])
+            cascade (conj [:cascade]))))
 
 (m/=> column->modifiers
-  [:=> [:cat table-field-constraints]
+  [:=> [:cat fx.entity/entity? :keyword table-field-constraints]
    vector?])
 
 
 (defn ->set-ddl
   "Converts table fields to the list of HoneySQL alter clauses"
   [entity columns]
-  (->
-   (for [[column column-spec] columns]
-     (let [column-name (->column-name entity column)]
-       (for [[op value] column-spec]
-         (match [op value]
-           [:type _] {:alter-column [column-name :type value]}
-           [:optional true] {:alter-column [column-name :set [:not nil]]}
-           [:optional false] {:alter-column [column-name :drop [:not nil]]}
-           [:primary-key? true] {:add-index [:primary-key column-name]}
-           [:primary-key? false] {:drop-index [:primary-key column-name]}
-           [:foreign-key? ref] {:add-constraint [(str (name column) "-fk") [:foreign-key] [:references ref]]}
-           [:foreign-key? false] {:drop-constraint [(str (name column) "-fk")]}
-           [:cascade _] {:alter-column [column-name :set [:cascade]]}
-           [:default default] {:alter-column-raw [column-name :set [:default default]]}))))
-   flatten))
+  (let [table (fx.entity/prop entity :table)]
+    (->
+     (for [[column column-spec] columns]
+       (let [column-name (->column-name entity column)]
+         (for [[op value] column-spec]
+           (match [op value]
+             [:type _] {:alter-column [column-name :type value]}
+             [:optional true] {:alter-column [column-name :set [:not nil]]}
+             [:optional false] {:alter-column [column-name :drop [:not nil]]}
+             [:primary-key true] {:add-index [:primary-key column-name]}
+             [:primary-key false] {:drop-index [:primary-key column-name]}
+             [:foreign-key ref] {:add-constraint [(str (name column) "-fk") [:foreign-key] [:references ref]]}
+             [:foreign-key false] {:drop-constraint [(str (name column) "-fk")]}
+             [:cascade _] {:alter-column [column-name :set [:cascade]]}
+             [:default default] {:alter-column-raw [column-name :set [:default default]]}
+             [:unique true] {:add-constraint [[:raw (->constraint-name table column "unique")] [:unique nil column-name]]}
+             [:unique false] {:drop-constraint [[:raw (->constraint-name table column "unique")]]}))))
+     flatten)))
 
 (m/=> ->set-ddl
   [:=> [:cat fx.entity/entity? [:map-of :keyword map?]]
@@ -387,17 +405,20 @@
 (defn ->constraints-drop-ddl
   "Converts table fields to the list of HoneySQL drop clauses"
   [entity columns]
-  (->
-   (for [[column column-spec] columns]
-     (let [column-name (->column-name entity column)]
-       (for [[op value] column-spec]
-         (match [op value]
-           [:optional 0] {:alter-column [column-name :drop [:not nil]]}
-           [:primary-key? 0] {:drop-index [:primary-key column-name]}
-           [:foreign-key? 0] {:drop-constraint [(str (name column) "-fk")]}
-           [:cascade _] {:alter-column [column-name :set [:cascade]]}
-           [:default 0] {:alter-column [column-name :drop [:default]]}))))
-   flatten))
+  (let [table (fx.entity/prop entity :table)]
+    (->
+     (for [[column column-spec] columns]
+       (let [column-name (->column-name entity column)]
+         (for [[op value] column-spec]
+           (match [op value]
+             [:optional 0] {:alter-column [column-name :drop [:not nil]]}
+             [:primary-key 0] {:drop-index [:primary-key column-name]}
+             [:foreign-key 0] {:drop-constraint [(str (name column) "-fk")]}
+             [:cascade _] {:alter-column [column-name :set [:cascade]]}
+             [:default 0] {:alter-column [column-name :drop [:default]]}
+             [:unique 0] {:drop-constraint [[:raw (->constraint-name table column "unique")]]}))))
+     flatten)))
+
 
 (m/=> ->constraints-drop-ddl
   [:=> [:cat fx.entity/entity? [:map-of :keyword map?]]
@@ -407,7 +428,7 @@
 (defn ->add-ddl [entity all-columns cols-to-add]
   (mapv (fn [col-name]
           (let [column (get all-columns col-name)]
-            (->> (column->modifiers column)
+            (->> (column->modifiers entity col-name column)
                  (into [(->column-name entity col-name) (:type column)])
                  (hash-map :add-column-raw))))
         cols-to-add))
@@ -488,7 +509,7 @@
                      (mapv (fn [[field-key schema]]
                              (let [column-name (->column-name entity field-key)]
                                (-> [column-name [:inline (-> schema fx.entity/field-schema schema->column-type)]]
-                                   (concat (schema->column-modifiers schema))
+                                   (concat (schema->column-modifiers entity field-key schema))
                                    vec)))))]
     (cond-> columns
             (some? pk)

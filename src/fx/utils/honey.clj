@@ -54,6 +54,12 @@
    [(str type "[]")]))
 
 
+(sql/register-fn!
+ :named-constraint
+ (fn [_ [name constraint]]
+   [(str "CONSTRAINT " name " " (first (sql/format-expr constraint)))]))
+
+
 (defn format-simple-expr [e context]
   (let [[sql & params] (sql/format-expr e)]
     (when (seq params)

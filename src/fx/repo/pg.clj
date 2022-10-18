@@ -479,6 +479,14 @@
    data))
 
 
+(defn where-clause [where-clauses eq-clauses]
+  (cond
+    (and (some? where-clauses) (some? eq-clauses)) [:and where-clauses eq-clauses]
+    (some? eq-clauses) eq-clauses
+    (some? where-clauses) where-clauses
+    :else nil))
+
+
 (defn pg-save!
   "Save record in database"
   [^DataSource database entity data]
@@ -518,9 +526,7 @@
         eq-clauses   (some-> (prep-data-map entity params)
                              (not-empty)
                              (sql/map=))
-        where-clause (if (some? eq-clauses)
-                       [:and where eq-clauses]
-                       where)
+        where-clause (where-clause where eq-clauses)
         query        (-> {:update-raw [:quote table]
                           :set        (prep-data-map entity data)
                           :where      where-clause}
@@ -541,9 +547,7 @@
         eq-clauses   (some-> (prep-data-map entity params)
                              (not-empty)
                              (sql/map=))
-        where-clause (if (some? eq-clauses)
-                       [:and where eq-clauses]
-                       where)
+        where-clause (where-clause where eq-clauses)
         query        (sql/format
                       {:delete-from (keyword table)
                        :where       where-clause})]
@@ -562,9 +566,7 @@
   (let [eq-clauses (some-> (prep-data-map entity params)
                            (not-empty)
                            (sql/map=))
-        where-map  {:where (if (some? eq-clauses)
-                             [:and where eq-clauses]
-                             where)}
+        where-map  {:where (where-clause where eq-clauses)}
         select-map (entity-select-query entity fields nested)
         query      (-> select-map
                        (merge where-map)
@@ -592,10 +594,7 @@
                            (sql/map=))
         rest-map   (mdl/assoc-some
                     {}
-                    :where (cond
-                             (and (some? where) (some? eq-clauses)) [:and where eq-clauses]
-                             (some? where) where
-                             :else nil)
+                    :where (where-clause where eq-clauses)
                     :limit limit
                     :offset offset
                     :order-by order-by)
