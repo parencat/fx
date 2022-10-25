@@ -133,4 +133,60 @@
             (is (= 2 (count result)))))))))
 
 
+(def ^{:fx/autowire :fx/entity} teacher
+  [:spec {:table "teacher"}
+   [:id {:identity true} :uuid]
+   [:name :string]])
+
+(def ^{:fx/autowire :fx/entity} course
+  [:spec {:table "course"}
+   [:id {:identity true} :uuid]
+   [:title :string]
+   [:teacher {:rel-type :one-to-one
+              :cascade  true} ::teacher]])
+
+(def course-no-cascade
+  [:spec {:table "course"}
+   [:id {:identity true} :uuid]
+   [:title :string]
+   [:teacher {:rel-type :one-to-one} ::teacher]])
+
+
+(deftest cascade-test
+  (with-system [system config]
+    (let [ds         (val (ig/find-derived-1 system :fx.database/connection))
+          teacher    (val (ig/find-derived-1 system ::teacher))
+          course     (val (ig/find-derived-1 system ::course))
+          teacher-id (random-uuid)
+          course-id  (random-uuid)]
+
+      (testing "course should be deleted automatically when teacher is deleted"
+        (fx.repo/save! teacher {:id teacher-id :name "John"})
+        (fx.repo/save! course {:id course-id :title "Math" :teacher teacher-id})
+
+        (is (some? (fx.repo/find! teacher {:id teacher-id})))
+        (is (some? (fx.repo/find! course {:id course-id})))
+
+        (fx.repo/delete! teacher {:id teacher-id})
+
+        (is (nil? (fx.repo/find! teacher {:id teacher-id})))
+        (is (nil? (fx.repo/find! course {:id course-id}))))
+
+      (testing "altering cascade key"
+        (let [course-spec   (-> course-no-cascade entity/prepare-spec :spec)
+              course-entity (entity/create-entity ::course course-spec)]
+
+          (fx.migrate/apply-migrations! {:database ds
+                                         :entities #{course-entity}})
+
+          (fx.repo/save! teacher {:id teacher-id :name "John"})
+          (fx.repo/save! course {:id course-id :title "Math" :teacher teacher-id})
+
+          (is (some? (fx.repo/find! teacher {:id teacher-id})))
+          (is (some? (fx.repo/find! course {:id course-id})))
+
+          (is (thrown? Exception
+                       (fx.repo/delete! teacher {:id teacher-id}))
+              "can't delete teacher because it referenced in the course record"))))))
+
 

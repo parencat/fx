@@ -162,7 +162,10 @@
             (some? default) (conj [:default default])
             unique (conj [:named-constraint (->constraint-name table field-key "unique") [:unique]])
             identity (conj [:primary-key])
-            (and reference (some? @ref-table)) (conj [:references [:quote @ref-table]])
+
+            (and reference (some? @ref-table))
+            (conj [:constraint [:quote (->constraint-name table field-key "fkey")]]
+                  [:references [:quote @ref-table]])
             cascade (conj [:cascade]))))
 
 (m/=> schema->column-modifiers
@@ -284,7 +287,8 @@
    [:non-unique {:optional true} :boolean]
    [:pk-name {:optional true} :string]
    [:pktable-name {:optional true} :string]
-   [:fkcolumn-name {:optional true} :string]])
+   [:fkcolumn-name {:optional true} :string]
+   [:delete-rule {:optional true} :int]])
 
 (m/=> extract-db-columns
   [:=> [:cat connection? :string]
@@ -302,16 +306,16 @@
 
 (defn column->constraints-map
   "Convert table field map to field constraints map"
-  [{:keys [nullable pk-name fkcolumn-name pktable-name column-def non-unique]}]
+  [{:keys [nullable pk-name fkcolumn-name pktable-name column-def non-unique delete-rule]}]
   (cond-> {}
           (= nullable 1) (assoc :optional true)
-          (some? pk-name) (assoc :primary-key true)
+          (and (some? pk-name)
+               (not fkcolumn-name)) (assoc :primary-key true)
           (some? fkcolumn-name) (assoc :foreign-key pktable-name)
           (string? column-def) (assoc :default (extract-default-val column-def))
           (and (some? non-unique)
-               (not (some? pk-name)))
-          (assoc :unique (not non-unique))))
-;;(:cascade props) (assoc :cascade true)))
+               (not (some? pk-name))) (assoc :unique (not non-unique))
+          (= delete-rule DatabaseMetaData/importedKeyCascade) (assoc :cascade true)))
 
 (m/=> column->constraints-map
   [:=> [:cat raw-table-field]
@@ -319,7 +323,7 @@
 
 
 (def default-column-size
-  2147483647)       ;; Not very reliable number
+  2147483647)       ;; TODO Not very reliable number
 
 
 (defn get-db-columns
@@ -367,12 +371,19 @@
             (some? default) (conj [:default default])
             (true? unique) (conj [:named-constraint (->constraint-name table col-name "unique") [:unique]])
             primary-key (conj [:primary-key])
-            (some? foreign-key) (conj [:references [:quote foreign-key]])
+            (some? foreign-key) (conj [:constraint [:quote (->constraint-name table col-name "fkey")]]
+                                      [:references [:quote foreign-key]])
             cascade (conj [:cascade]))))
 
 (m/=> column->modifiers
   [:=> [:cat fx.entity/entity? :keyword table-field-constraints]
    vector?])
+
+
+(defn get-ref-table [entity field]
+  (-> (fx.entity/entity-field entity field)
+      (val)
+      (fx.entity/ref-entity-prop :table)))
 
 
 (defn ->set-ddl
@@ -381,7 +392,8 @@
   (let [table (fx.entity/prop entity :table)]
     (->
      (for [[column column-spec] columns]
-       (let [column-name (->column-name entity column)]
+       (let [column-name (->column-name entity column)
+             column-fk   (->constraint-name table column "fkey")]
          (for [[op value] column-spec]
            (match [op value]
              [:type _] {:alter-column [column-name :type value]}
@@ -389,9 +401,20 @@
              [:optional false] {:alter-column [column-name :drop [:not nil]]}
              [:primary-key true] {:add-index [:primary-key column-name]}
              [:primary-key false] {:drop-index [:primary-key column-name]}
-             [:foreign-key ref] {:add-constraint [(str (name column) "-fk") [:foreign-key] [:references ref]]}
-             [:foreign-key false] {:drop-constraint [(str (name column) "-fk")]}
-             [:cascade _] {:alter-column [column-name :set [:cascade]]}
+             [:foreign-key ref] {:add-constraint [[:quote column-fk]
+                                                  [:foreign-key column-name]
+                                                  [:references [:quote ref]]]}
+             [:foreign-key false] {:drop-constraint [[:quote column-fk]]}
+             [:cascade true] [{:drop-constraint [[:quote column-fk]]}
+                              {:add-constraint [[:quote column-fk]
+                                                [:foreign-key column-name]
+                                                [:references [:quote (get-ref-table entity column)]]
+                                                [:cascade]]}]
+             [:cascade false] [{:drop-constraint [[:quote column-fk]]}
+                               {:add-constraint [[:quote column-fk]
+                                                 [:foreign-key column-name]
+                                                 [:references [:quote (get-ref-table entity column)]]
+                                                 [:no-action]]}]
              [:default default] {:alter-column-raw [column-name :set [:default default]]}
              [:unique true] {:add-constraint [[:raw (->constraint-name table column "unique")] [:unique nil column-name]]}
              [:unique false] {:drop-constraint [[:raw (->constraint-name table column "unique")]]}))))
@@ -408,13 +431,17 @@
   (let [table (fx.entity/prop entity :table)]
     (->
      (for [[column column-spec] columns]
-       (let [column-name (->column-name entity column)]
+       (let [column-name (->column-name entity column)
+             column-fk   (->constraint-name table column "fkey")]
          (for [[op value] column-spec]
            (match [op value]
              [:optional 0] {:alter-column [column-name :drop [:not nil]]}
              [:primary-key 0] {:drop-index [:primary-key column-name]}
-             [:foreign-key 0] {:drop-constraint [(str (name column) "-fk")]}
-             [:cascade _] {:alter-column [column-name :set [:cascade]]}
+             [:foreign-key 0] {:drop-constraint [[:quote column-fk]]}
+             [:cascade 0] [{:drop-constraint [[:quote column-fk]]}
+                           {:add-constraint [[:quote column-fk]
+                                             [:foreign-key column-name]
+                                             [:references [:quote (get-ref-table entity column)]]]}]
              [:default 0] {:alter-column [column-name :drop [:default]]}
              [:unique 0] {:drop-constraint [[:raw (->constraint-name table column "unique")]]}))))
      flatten)))
