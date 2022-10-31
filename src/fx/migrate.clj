@@ -525,24 +525,22 @@
   "Converts entity spec to a list of HoneySQL vectors representing individual fields
    e.g. [[:id :uuid [:not nil] [:primary-key]] ...]"
   [entity]
-  (let [pk      (fx.entity/prop entity :identity)
-        columns (->> (fx.entity/entity-fields entity)
-                     (filter (fn [[_ field-schema]]
-                               (or (not (fx.entity/ref? field-schema))
-                                   (let [props     (fx.entity/properties field-schema)
-                                         ref-table (fx.entity/ref-entity-prop field-schema :table)]
-                                     (or (not ref-table)
-                                         (not (fx.entity/optional-ref? props)))))))
-                     (mapv (fn [[field-key schema]]
-                             (let [column-name (->column-name entity field-key)]
-                               (-> [column-name [:inline (-> schema fx.entity/field-schema schema->column-type)]]
-                                   (concat (schema->column-modifiers entity field-key schema))
-                                   vec)))))]
+  (let [composite-pk (fx.entity/prop entity :identity)
+        columns      (->> (fx.entity/entity-fields entity)
+                          (filter (fn [[_ field-schema]]
+                                    (or (not (fx.entity/ref? field-schema))
+                                        (let [props     (fx.entity/properties field-schema)
+                                              ref-table (fx.entity/ref-entity-prop field-schema :table)]
+                                          (or (not ref-table)
+                                              (not (fx.entity/optional-ref? props)))))))
+                          (mapv (fn [[field-key schema]]
+                                  (let [column-name (->column-name entity field-key)]
+                                    (-> [column-name [:inline (-> schema fx.entity/field-schema schema->column-type)]]
+                                        (concat (schema->column-modifiers entity field-key schema))
+                                        vec)))))]
     (cond-> columns
-            (some? pk)
-            (conj (->> pk
-                       (into [:primary-key])
-                       vector)))))
+            (some? composite-pk)
+            (conj [(apply conj [:primary-key] composite-pk)]))))
 
 (m/=> entity->columns-ddl
   [:=> [:cat fx.entity/entity?]
