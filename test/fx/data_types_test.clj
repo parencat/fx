@@ -9,9 +9,10 @@
    [next.jdbc :as jdbc]
    [next.jdbc.result-set :as jdbc.rs]
    [malli.instrument :as mi]
-   [medley.core :as mdl])
+   [medley.core :as mdl]
+   [fx.entity :as entity])
   (:import
-   [java.time LocalDateTime OffsetDateTime ZoneOffset LocalDate LocalTime OffsetTime Duration Instant ZoneId]))
+   [java.time LocalDateTime OffsetDateTime ZoneOffset LocalDate LocalTime OffsetTime Duration]))
 
 
 (duct/load-hierarchy)
@@ -240,3 +241,29 @@
       (let [{:keys [items]} (fx.repo/find! order {:id order-id})]
         (is (sequential? items))
         (is (= 3 (count items)))))))
+
+
+(def ^{:fx/autowire :fx/entity} fruit
+  [:spec {:enum   "fruit"
+          :values ["apple" "banana" "orange"]}])
+
+
+(def fruit-extended
+  [:spec {:enum   "fruit"
+          :values ["apple" "banana" "orange" "cherry"]}])
+
+
+(deftest array-type-test
+  (with-system [system config]
+    (let [ds (val (ig/find-derived-1 system :fx.database/connection))]
+      (is (= ["apple" "banana" "orange"]
+             (fx.migrate/get-db-enum-values ds "fruit")))
+
+      (let [fruit        (-> fruit-extended entity/prepare-spec :spec)
+            fruit-entity (entity/create-entity :fx.data-types-test/fruit fruit)]
+
+        (fx.migrate/apply-migrations! {:database ds
+                                       :entities #{fruit-entity}})
+
+        (is (= ["apple" "banana" "orange" "cherry"]
+               (fx.migrate/get-db-enum-values ds "fruit")))))))

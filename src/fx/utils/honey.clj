@@ -135,6 +135,13 @@
 (sql/register-clause! :drop-enum drop-enum :create-extension)
 
 
+(defn- add-enum-value [_ [enum value]]
+  [(str "ALTER TYPE " enum " ADD VALUE '" value "'")])
+
+
+(sql/register-clause! :add-enum-value add-enum-value :create-extension)
+
+
 (defn constraint [k xs]
   [(str (sql/sql-kw k) " " (format-single-column xs))])
 

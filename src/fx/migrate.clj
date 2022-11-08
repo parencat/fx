@@ -11,6 +11,7 @@
    [weavejester.dependency :as dep]
    [medley.core :as mdl]
    [differ.core :as differ]
+   [differ.diff :as ddiff]
    [malli.core :as m]
    [malli.util :as mu]
    [fx.utils.types :refer [connection? clock?]]
@@ -18,7 +19,8 @@
   (:import
    [javax.sql DataSource]
    [java.sql DatabaseMetaData Connection]
-   [java.time Clock]))
+   [java.time Clock]
+   [org.postgresql.util PSQLException]))
 
 
 ;; =============================================================================
@@ -248,6 +250,17 @@
 (m/=> table-exist?
   [:=> [:cat connection? :string]
    :boolean])
+
+
+(defn enum-exist? [^DataSource database enum]
+  (try
+    (->> enum
+         (format "SELECT '%s'::regtype;")
+         (vector)
+         (jdbc/execute! database)
+         (some?))
+    (catch PSQLException _ex
+      false)))
 
 
 (def index-by-name
@@ -596,6 +609,33 @@
    vector?])
 
 
+(defn get-db-enum-values [database enum]
+  (->> (sql/format {:select   [[[:array_agg :e.enumlabel] :values]]
+                    :from     [[:pg_type :t]]
+                    :join     [[:pg_enum :e] [:= :t.oid :e.enumtypid]]
+                    :where    [:= :t.typname enum]
+                    :group-by [:t.typname]})
+       (jdbc/execute-one! database)
+       :values))
+
+
+(defn add-enum-value [enum value]
+  (sql/format {:add-enum-value [enum value]}))
+
+
+(defn update-enum [database entity enum migrations]
+  (let [existing-values (get-db-enum-values database enum)
+        entity-values   (fx.entity/prop entity :values)
+        values          (->> (ddiff/alterations existing-values entity-values)
+                             (rest)
+                             (take-nth 2))]
+    (reduce
+     (fn [acc value]
+       (conj acc (add-enum-value enum value) nil))
+     migrations
+     values)))
+
+
 (defn entity->migration
   "Given an entity will check if some updates were introduced
    If so will return a set of SQL migrations string"
@@ -610,15 +650,19 @@
       (some? table)
       (update-table database entity table migrations)
 
-      (some? enum)
+      (and (some? enum)
+           (not (enum-exist? database enum)))
       (create-enum entity enum migrations)
+
+      (some? enum)
+      (update-enum database entity enum migrations)
 
       :else
       migrations)))
 
 (m/=> entity->migration
-  [:=> [:cat connection? [:vector [:vector :string]] fx.entity/entity?]
-   [:vector [:vector :string]]])
+  [:=> [:cat connection? [:vector [:maybe [:vector :string]]] fx.entity/entity?]
+   [:vector [:maybe [:vector :string]]]])
 
 
 (defn sort-by-dependencies
@@ -690,7 +734,7 @@
 
 (m/=> get-all-migrations
   [:=> [:cat connection? [:set fx.entity/entity?]]
-   [:vector [:vector :string]]])
+   [:vector [:maybe [:vector :string]]]])
 
 
 (defn get-entity-migrations-map
@@ -709,7 +753,7 @@
   [:=> [:cat connection? [:set fx.entity/entity?]]
    [:map-of :qualified-keyword [:map
                                 [:up [:vector :string]]
-                                [:down [:vector :string]]]]])
+                                [:down [:maybe [:vector :string]]]]]])
 
 
 (defn prep-migrations
@@ -724,7 +768,7 @@
   [:=> [:cat connection? [:set fx.entity/entity?]]
    [:map
     [:migrations [:vector [:vector :string]]]
-    [:rollback-migrations [:vector [:vector :string]]]]])
+    [:rollback-migrations [:vector [:maybe [:vector :string]]]]]])
 
 
 (defn has-changes?
@@ -742,7 +786,6 @@
 (m/=> has-changes?
   [:=> [:cat table-fields table-fields]
    :boolean])
-
 
 
 (def vars-matcher
@@ -781,7 +824,8 @@
   (try
     (let [{:keys [migrations rollback-migrations]} (prep-migrations database entities)]
       (jdbc/with-transaction [tx database]
-        (doseq [migration migrations]
+        (doseq [migration migrations
+                :when (some? migration)]
           (println "Running migration" migration)
           (jdbc/execute! tx migration)))
       {:rollback-migrations rollback-migrations})
@@ -794,14 +838,15 @@
               [:database connection?]
               [:entities [:set fx.entity/entity?]]]]
    [:map
-    [:rollback-migrations [:vector [:vector :string]]]]])
+    [:rollback-migrations [:vector [:maybe [:vector :string]]]]]])
 
 
 (defn drop-migrations!
   "Rollback all changes made by apply-migrations! call"
   [^DataSource database rollback-migrations]
   (jdbc/with-transaction [tx database]
-    (doseq [migration rollback-migrations]
+    (doseq [migration rollback-migrations
+            :when (some? migration)]
       (println "Rolling back" migration)
       (jdbc/execute! tx migration))))
 
