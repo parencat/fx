@@ -12,19 +12,20 @@
                  [integrant "0.8.0"]
                  [weavejester/dependency "0.2.1"]
                  [medley "1.4.0"]
-                 [metosin/malli "0.8.9"]
+                 [metosin/malli "0.9.2"]
                  [differ "0.3.3"]
-                 [com.github.seancorfield/next.jdbc "1.3.834"]
-                 [com.github.seancorfield/honeysql "2.3.928"]
+                 [com.github.seancorfield/next.jdbc "1.3.847"]
+                 [com.github.seancorfield/honeysql "2.4.947"]
                  [org.postgresql/postgresql "42.5.0"]
-                 [hikari-cp "2.14.0"]
+                 [hikari-cp "3.0.0"]
                  [clj-test-containers "0.7.3"]
                  [org.testcontainers/postgresql "1.17.4"]
                  [com.cnuernber/charred "1.014"]]
 
   :profiles
-  {:dev {:dependencies [[vvvvalvalval/scope-capture "0.3.3-s1"]
-                        [djblue/portal "0.31.0"]]}}
+  {:dev {:source-paths ["dev"]
+         :dependencies [[vvvvalvalval/scope-capture "0.3.3-s1"]
+                        [djblue/portal "0.34.2"]]}}
 
   :deploy-repositories
   [["clojars" {:sign-releases false

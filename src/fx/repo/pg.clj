@@ -12,6 +12,7 @@
    [medley.core :as mdl]
    [fx.utils.honey]
    [fx.utils.types :refer [pgobject? connection?]]
+   [fx.utils.common :refer [tap->]]
    [fx.entity]
    [fx.migrate :as migrate]
    [fx.repo :refer [IRepo]]
@@ -352,16 +353,18 @@
         refs          (get-refs-list entity nested)]
     (reduce (fn [query [ref-key ref]]
               (let [ref-name   (str/replace (name ref-key) "-" "_")
-                    join-query (prep-join-query {:entity     entity
-                                                 :ref        ref
-                                                 :table-name table-name
-                                                 :ref-key    ref-key
-                                                 :ref-name   ref-name
-                                                 :nested     nested})
-                    json-query (prep-json-query {:ref        ref
-                                                 :table-name table-name
-                                                 :ref-name   ref-name
-                                                 :join-query join-query})]
+                    join-query (prep-join-query
+                                {:entity     entity
+                                 :ref        ref
+                                 :table-name table-name
+                                 :ref-key    ref-key
+                                 :ref-name   ref-name
+                                 :nested     nested})
+                    json-query (prep-json-query
+                                {:ref        ref
+                                 :table-name table-name
+                                 :ref-name   ref-name
+                                 :join-query join-query})]
                 (update query :select conj [[:nest [:raw json-query]] ref-key])))
             default-query
             refs)))
@@ -493,10 +496,9 @@
   ;; TODO deal with nested records (not JSON fields). Extract identity field if it's map
   (let [table (fx.entity/prop entity :table)
         [columns values] (prep-data entity data)
-        query (-> {:insert-into table
-                   :columns     columns
-                   :values      [values]}
-                  (sql/format))]
+        query (sql/format {:insert-into table
+                           :columns     columns
+                           :values      [values]})]
     (jdbc/execute-one! database query
       {:return-keys true
        :builder-fn  jdbc.rs/as-unqualified-kebab-maps})))
@@ -527,16 +529,19 @@
                              (not-empty)
                              (sql/map=))
         where-clause (where-clause where eq-clauses)
-        query        (-> {:update-raw [:quote table]
-                          :set        (prep-data-map entity data)
-                          :where      where-clause}
-                         (sql/format))]
+        query        (sql/format {:update-raw [:quote table]
+                                  :set        (prep-data-map entity data)
+                                  :where      where-clause})]
     (jdbc/execute-one! database query
       {:return-keys true
        :builder-fn  jdbc.rs/as-unqualified-kebab-maps})))
 
 (m/=> pg-update!
-  [:=> [:cat connection? fx.entity/entity? map? [:map [:where {:optional true} vector?]]]
+  [:=> [:cat
+        connection?
+        fx.entity/entity?
+        map?
+        [:map [:where {:optional true} vector?]]]
    map?])
 
 
@@ -548,15 +553,17 @@
                              (not-empty)
                              (sql/map=))
         where-clause (where-clause where eq-clauses)
-        query        (sql/format
-                      {:delete-from (keyword table)
-                       :where       where-clause})]
+        query        (sql/format {:delete-from (keyword table)
+                                  :where       where-clause})]
     (jdbc/execute-one! database query
       {:return-keys true
        :builder-fn  jdbc.rs/as-unqualified-kebab-maps})))
 
 (m/=> pg-delete!
-  [:=> [:cat connection? fx.entity/entity? [:map [:where {:optional true} vector?]]]
+  [:=> [:cat
+        connection?
+        fx.entity/entity?
+        [:map [:where {:optional true} vector?]]]
    map?])
 
 
@@ -570,7 +577,8 @@
         select-map (entity-select-query entity fields nested)
         query      (-> select-map
                        (merge where-map)
-                       (sql/format {:quoted true}))
+                       (sql/format {:quoted true})
+                       (tap-> "Find query"))
         record     (jdbc/execute-one! database query
                      {:return-keys true
                       :builder-fn  jdbc.rs/as-unqualified-kebab-maps})]
@@ -579,10 +587,13 @@
       record)))
 
 (m/=> pg-find!
-  [:=> [:cat connection? fx.entity/entity? [:map
-                                            [:fields {:optional true} [:vector :keyword]]
-                                            [:where {:optional true} vector?]
-                                            [:nested {:optional true} nested-params?]]]
+  [:=> [:cat
+        connection?
+        fx.entity/entity?
+        [:map
+         [:fields {:optional true} [:vector :keyword]]
+         [:where {:optional true} vector?]
+         [:nested {:optional true} nested-params?]]]
    [:maybe map?]])
 
 
@@ -610,13 +621,16 @@
       records)))
 
 (m/=> pg-find-all!
-  [:=> [:cat connection? fx.entity/entity? [:map
-                                            [:fields {:optional true} [:vector :keyword]]
-                                            [:where {:optional true} vector?]
-                                            [:nested {:optional true} nested-params?]
-                                            [:order-by {:optional true} vector?]
-                                            [:limit {:optional true} :int]
-                                            [:offset {:optional true} :int]]]
+  [:=> [:cat
+        connection?
+        fx.entity/entity?
+        [:map
+         [:fields {:optional true} [:vector :keyword]]
+         [:where {:optional true} vector?]
+         [:nested {:optional true} nested-params?]
+         [:order-by {:optional true} vector?]
+         [:limit {:optional true} :int]
+         [:offset {:optional true} :int]]]
    [:maybe [:vector map?]]])
 
 

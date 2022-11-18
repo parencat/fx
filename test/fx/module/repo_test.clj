@@ -162,6 +162,10 @@
 
     (ig/halt! system)))
 
+(comment
+ "SELECT *, (SELECT ROW_TO_JSON(\"user_post\") FROM (SELECT * FROM \"post\" WHERE \"id\" = \"user\".\"post\") AS \"user_post\") AS post FROM user WHERE id = ?"
+ "SELECT *, (SELECT ROW_TO_JSON(\"user_post\") FROM (SELECT * FROM \"post\" WHERE \"id\" = \"user\".\"post\") AS \"user_post\") AS \"post\" FROM \"user\" WHERE \"id\" = ?"
+ nil)
 
 (deftest find-all-test
   (let [config (duct/prep-config config)

@@ -120,7 +120,10 @@
 ;; =============================================================================
 
 (def app-config
-  {:duct.profile/base  {:duct.core/project-ns 'test}
+  {:duct.profile/base  {:duct.core/project-ns                                      'test
+                        :fx.module.stub-functions/fn-with-config                   {:test 1}
+                        :fx.module.stub-functions/fn-with-deps-and-config          {:test 2}
+                        :fx.module.stub-functions/fn-with-deps-and-config-and-args {:test 3}}
    :fx.module/autowire {:root 'fx.module.stub-functions}})
 
 
@@ -173,5 +176,21 @@
       (let [composite-key [:fx.module.stub-functions/test :fx.module.stub-functions/child-test-component]]
         (is (contains? config composite-key))
         (is (= :test (get-in config [composite-key :component])))))
+
+    (ig/halt! system)))
+
+
+(deftest config-passing-test
+  (let [config (duct/prep-config app-config)
+        system (ig/init config)]
+
+    (testing "additional parameters from the config should be passed to components"
+      (let [fn-with-config                   (:fx.module.stub-functions/fn-with-config system)
+            db-connection                    (:fx.module.stub-functions/db-connection system)
+            fn-with-deps-and-config          (:fx.module.stub-functions/fn-with-deps-and-config system)
+            fn-with-deps-and-config-and-args (:fx.module.stub-functions/fn-with-deps-and-config-and-args system)]
+        (is (= fn-with-config {:test 1}))
+        (is (= fn-with-deps-and-config [db-connection {:test 2}]))
+        (is (= (fn-with-deps-and-config-and-args :args) [db-connection {:test 3} :args]))))
 
     (ig/halt! system)))

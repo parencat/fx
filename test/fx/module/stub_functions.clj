@@ -63,3 +63,15 @@
 ;; will work only for vars
 (def ^{:fx/autowire ::test} child-test-component
   {:component :test})
+
+
+(defn ^:fx/autowire fn-with-config [config]
+  config)
+
+
+(defn ^:fx/autowire fn-with-deps-and-config [^::db-connection db-connection config]
+  [db-connection config])
+
+
+(defn ^:fx/autowire ^:fx/wrap fn-with-deps-and-config-and-args [^::db-connection db-connection config args]
+  [db-connection config args])

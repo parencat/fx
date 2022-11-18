@@ -5,7 +5,8 @@
    [clojure.string]
    [clojure.tools.namespace.find :as tools.find]
    [malli.core :as m]
-   [fx.utils.loader :as loader]))
+   [fx.utils.loader :as loader]
+   [duct.core :as duct]))
 
 
 (def ig-ref
@@ -136,8 +137,14 @@
 
       fn-comp?
       (defmethod ig/init-key comp-key [_ params]
-        (let [params-values (mapv #(get params (keyword (name %))) ;; TODO include non dependencies values as well
-                                  params-keys)]
+        (let [deps-keys     (mapv (comp keyword name) params-keys)
+              deps-values   (if (seq deps-keys)
+                              ((apply juxt deps-keys) params)
+                              [])
+              rest-params   (apply dissoc params deps-keys)
+              params-values (if (not-empty rest-params)
+                              (conj deps-values rest-params)
+                              deps-values)]
           (if wrap?
             ;; return component as anonymous function
             (fn [& args]
@@ -194,4 +201,4 @@
         components        (find-components pns)
         components-config (prep-components-config components)]
     (fn [config]
-      (merge config components-config))))
+      (duct/merge-configs config components-config))))

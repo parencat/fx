@@ -69,6 +69,7 @@
         (locking RT/REQUIRE_LOCK
           (apply clojure.core/require args)))
       (catch Throwable e
+        ;; TODO might be better to just log such issues rather throwing exceptions
         (throw (ex-info (.getMessage e)
                         {:classloader      (the-classloader)
                          :system-classpath (sort (str/split (System/getProperty "java.class.path") #"[:;]"))}

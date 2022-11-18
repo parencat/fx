@@ -6,15 +6,16 @@
    [next.jdbc :as jdbc]
    [next.jdbc.result-set :as rs]
    [fx.entity :as fx.entity]
-   [honey.sql :as sql]
    [fx.utils.honey]
+   [fx.utils.types :refer [connection? clock?]]
+   [fx.utils.common :refer [tap->>]]
+   [honey.sql :as sql]
    [weavejester.dependency :as dep]
    [medley.core :as mdl]
    [differ.core :as differ]
    [differ.diff :as ddiff]
    [malli.core :as m]
    [malli.util :as mu]
-   [fx.utils.types :refer [connection? clock?]]
    [clojure.java.io :as io])
   (:import
    [javax.sql DataSource]
@@ -826,7 +827,7 @@
       (jdbc/with-transaction [tx database]
         (doseq [migration migrations
                 :when (some? migration)]
-          (println "Running migration" migration)
+          (tap->> "Running migration" migration)
           (jdbc/execute! tx migration)))
       {:rollback-migrations rollback-migrations})
     (catch Throwable t
@@ -847,7 +848,7 @@
   (jdbc/with-transaction [tx database]
     (doseq [migration rollback-migrations
             :when (some? migration)]
-      (println "Rolling back" migration)
+      (tap->> "Rolling back" migration)
       (jdbc/execute! tx migration))))
 
 (m/=> drop-migrations!
