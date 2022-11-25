@@ -18,8 +18,8 @@
                  [com.github.seancorfield/honeysql "2.4.947"]
                  [org.postgresql/postgresql "42.5.0"]
                  [hikari-cp "3.0.0"]
-                 [clj-test-containers "0.7.3"]
-                 [org.testcontainers/postgresql "1.17.4"]
+                 [clj-test-containers "0.7.4"]
+                 [org.testcontainers/postgresql "1.17.6"]
                  [com.cnuernber/charred "1.014"]]
 
   :profiles
