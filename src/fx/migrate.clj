@@ -554,7 +554,7 @@
                                         vec)))))]
     (cond-> columns
             (some? composite-pk)
-            (conj [(apply conj [:primary-key] composite-pk)]))))
+            (conj [(apply conj [:primary-key] (map #(->column-name entity %) composite-pk))]))))
 
 (m/=> entity->columns-ddl
   [:=> [:cat fx.entity/entity?]
@@ -757,7 +757,7 @@
                                 [:down [:maybe [:vector :string]]]]]])
 
 
-(defn prep-migrations
+(defn prep-migrations ;; TODO throwing error if no entities in the project
   "Generates migrations for all entities in the system (forward and backward)"
   [^DataSource database entities]
   (let [all-migrations (get-all-migrations database entities)
