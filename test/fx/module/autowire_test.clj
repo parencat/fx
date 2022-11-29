@@ -97,12 +97,12 @@
 (deftest prep-component-test
   (let [result (sut/prep-component {} :fx.module.stub-functions/status #'sf/status)]
     (is (contains? result :fx.module.stub-functions/status))
-    (is (ig/ref? (get-in result [:fx.module.stub-functions/status :db-connection])))
+    (is (ig/ref? (get-in result [:fx.module.stub-functions/status :fx.module.stub-functions/db-connection])))
 
     (testing "integrant methods should be in place"
       (testing "init key"
         (let [init-method   (get-method ig/init-key :fx.module.stub-functions/status)
-              method-result (init-method nil {:db-connection (fn [] :connected)})]
+              method-result (init-method nil {:fx.module.stub-functions/db-connection (fn [] :connected)})]
           (is (= {:connection :connected
                   :status     :ok}
                  (method-result)))))
@@ -155,8 +155,8 @@
     (testing "dependency injection configured properly"
       (let [status-handler-conf (get config :fx.module.stub-functions/status)
             db-connection-conf  (get config :fx.module.stub-functions/db-connection)]
-        (is (contains? status-handler-conf :db-connection))
-        (is (ig/ref? (get status-handler-conf :db-connection)))
+        (is (contains? status-handler-conf :fx.module.stub-functions/db-connection))
+        (is (ig/ref? (get status-handler-conf :fx.module.stub-functions/db-connection)))
         (is (some? db-connection-conf))
 
         (testing "components return correct results"

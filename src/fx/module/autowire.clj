@@ -107,15 +107,15 @@
 (defn get-params-config
   "Given a vector of function parameters names returns a configuration map
    with integrant references.
-   E.g. [:some/dependency] => {:dependency (ig/ref :some/dependency)}"
-  [params-keys]
+   E.g. [:some/dependency] => {:some/dependency (ig/ref :some/dependency)}"
+  [deps-keys]
   (reduce (fn [acc param]
-            (assoc acc (keyword (name param)) (ig/ref param)))
-          {} params-keys))
+            (assoc acc param (ig/ref param)))
+          {} deps-keys))
 
 (m/=> get-params-config
   [:=> [:cat [:vector :qualified-keyword]]
-   [:map-of :keyword ig-ref]])
+   [:map-of :qualified-keyword ig-ref]])
 
 
 (defn prep-component
@@ -127,8 +127,8 @@
   (let [comp-meta     (meta comp-value)
         halt-key      (get comp-meta HALT-KEY)
         wrap?         (get comp-meta WRAP-KEY)
-        params-keys   (get-comp-deps comp-meta)
-        params-config (get-params-config params-keys)
+        deps-keys     (get-comp-deps comp-meta)
+        params-config (get-params-config deps-keys)
         fn-comp?      (fn? (deref comp-value))]
     (cond
       (and fn-comp? (keyword? halt-key))
@@ -137,8 +137,7 @@
 
       fn-comp?
       (defmethod ig/init-key comp-key [_ params]
-        (let [deps-keys     (mapv (comp keyword name) params-keys)
-              deps-values   (if (seq deps-keys)
+        (let [deps-values   (if (seq deps-keys)
                               ((apply juxt deps-keys) params)
                               [])
               rest-params   (apply dissoc params deps-keys)

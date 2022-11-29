@@ -4,7 +4,7 @@
    [hikari-cp.core :as hikari-cp]
    [next.jdbc.connection :as jdbc.conn])
   (:import
-   [javax.sql DataSource]))
+   [com.zaxxer.hikari HikariDataSource]))
 
 
 (defn get-db-spec [{:keys [url user password dbtype host dbname port] :as params}]
@@ -33,5 +33,6 @@
     (hikari-cp/make-datasource spec)))
 
 
-(defmethod ig/halt-key! :fx.database/connection [_ ^DataSource ds]
-  (hikari-cp/close-datasource ds))
+(defmethod ig/halt-key! :fx.database/connection [_ ^HikariDataSource ds]
+  (when-not (.isClosed ds)
+    (hikari-cp/close-datasource ds)))

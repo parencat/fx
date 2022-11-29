@@ -757,7 +757,7 @@
                                 [:down [:maybe [:vector :string]]]]]])
 
 
-(defn prep-migrations ;; TODO throwing error if no entities in the project
+(defn prep-migrations
   "Generates migrations for all entities in the system (forward and backward)"
   [^DataSource database entities]
   (let [all-migrations (get-all-migrations database entities)
@@ -823,13 +823,14 @@
    All migrations run in a single transaction"
   [{:keys [^DataSource database entities]}]
   (try
-    (let [{:keys [migrations rollback-migrations]} (prep-migrations database entities)]
-      (jdbc/with-transaction [tx database]
-        (doseq [migration migrations
-                :when (some? migration)]
-          (tap->> "Running migration" migration)
-          (jdbc/execute! tx migration)))
-      {:rollback-migrations rollback-migrations})
+    (when (seq entities)
+      (let [{:keys [migrations rollback-migrations]} (prep-migrations database entities)]
+        (jdbc/with-transaction [tx database]
+          (doseq [migration migrations
+                  :when (some? migration)]
+            (tap->> "Running migration" migration)
+            (jdbc/execute! tx migration)))
+        {:rollback-migrations rollback-migrations}))
     (catch Throwable t
       (println t)
       (throw t))))
@@ -860,16 +861,17 @@
   "Writes entities migrations code into files in .edn format"
   [{:keys [^DataSource database entities ^Clock clock path-pattern path-params]
     :or   {clock (Clock/systemUTC)}}]
-  (let [migrations (get-entity-migrations-map database entities)
-        timestamp  (.millis clock)]
-    (doseq [[entity migration] migrations]
-      (let [filename (interpolate (or path-pattern default-path-pattern)
-                                  (merge path-params
-                                         {:timestamp timestamp
-                                          :entity-ns (namespace entity)
-                                          :entity    (name entity)}))]
-        (io/make-parents filename)
-        (spit filename (str migration))))))
+  (when (seq entities)
+    (let [migrations (get-entity-migrations-map database entities)
+          timestamp  (.millis clock)]
+      (doseq [[entity migration] migrations]
+        (let [filename (interpolate (or path-pattern default-path-pattern)
+                                    (merge path-params
+                                           {:timestamp timestamp
+                                            :entity-ns (namespace entity)
+                                            :entity    (name entity)}))]
+          (io/make-parents filename)
+          (spit filename (str migration)))))))
 
 (m/=> store-migrations!
   [:=> [:cat [:map
@@ -885,14 +887,16 @@
   "Compares DB schema with entities specs.
    Returns true if there's no changes false otherwise"
   [{:keys [^DataSource database entities]}]
-  (->> entities
-       (some (fn [entity]
-               (let [table (fx.entity/prop entity :table)]
-                 (and (table-exist? database table)
-                      (let [db-columns     (get-db-columns database table)
-                            entity-columns (get-entity-columns entity)]
-                        (not (has-changes? db-columns entity-columns)))))))
-       boolean))
+  (if (seq entities)
+    (->> entities
+         (some (fn [entity]
+                 (let [table (fx.entity/prop entity :table)]
+                   (and (table-exist? database table)
+                        (let [db-columns     (get-db-columns database table)
+                              entity-columns (get-entity-columns entity)]
+                          (not (has-changes? db-columns entity-columns)))))))
+         boolean)
+    true))
 
 (m/=> validate-schema!
   [:=> [:cat [:map
