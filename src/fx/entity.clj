@@ -7,8 +7,10 @@
    [malli.error :as me]
    [malli.registry :as mr]
    [malli.transform :as mt]
+   [malli.generator :as mg]
    [fx.utils.common :as uc]
-   [fx.utils.types :as types])
+   [fx.utils.types :as types]
+   [clojure.test.check.generators :as gen])
   (:import
    [clojure.lang MapEntry]))
 
@@ -97,18 +99,23 @@
 (def entity-ref-schema
   (m/-simple-schema
    (fn [{:keys [entity-ref rel-type]} _children]
-     {:type            :entity-ref
-      :pred            (fn [x]
-                         (if (contains? sequential-relations rel-type)
-                           (m/validate [:sequential entity-ref] x {:registry entities-registry})
-                           (m/validate entity-ref x {:registry entities-registry})))
-      :type-properties {:decode/string #(string->identity entity-ref %)
-                        :error/fn      (fn [error _]
-                                         (if (contains? sequential-relations rel-type)
-                                           (format "should be a sequence of items matching %s spec, was %s"
-                                                   entity-ref (:value error))
-                                           (format "should match entity spec for %s, was %s"
-                                                   entity-ref (:value error))))}})))
+     (let [entity-ref-schema (mr/schema entities-registry entity-ref)]
+       {:type            :entity-ref
+        :pred            (fn [x]
+                           (if (contains? sequential-relations rel-type)
+                             (m/validate [:sequential entity-ref] x {:registry entities-registry})
+                             (m/validate entity-ref x {:registry entities-registry})))
+        :type-properties {:decode/string #(string->identity entity-ref %)
+                          :error/fn      (fn [error _]
+                                           (if (contains? sequential-relations rel-type)
+                                             (format "should be a sequence of items matching %s spec, was %s"
+                                                     entity-ref (:value error))
+                                             (format "should match entity spec for %s, was %s"
+                                                     entity-ref (:value error))))
+                          :gen/schema    (if (contains? sequential-relations rel-type)
+                                           [:sequential entity-ref-schema]
+                                           entity-ref-schema)}}))))
+
 
 (def registry*
   "Atom to hold malli schemas"
@@ -496,6 +503,31 @@
 (m/=> cast
   [:=> [:cat [:or entity? :qualified-keyword] map?]
    map?])
+
+
+(defn sample
+  "Creates single random entity sample which should match a schema"
+  [entity]
+  (let [schema (mr/schema entities-registry (or (:type entity) entity))]
+    (mg/generate schema {:seed     (rand-int 100)
+                         :registry entities-registry})))
+
+(m/=> sample
+  [:=> [:cat [:or entity? :qualified-keyword]]
+   map?])
+
+
+(defn samples
+  "Creates n number of random entity samples which should match a schema"
+  [entity n]
+  (let [schema (mr/schema entities-registry (or (:type entity) entity))]
+    (mg/sample schema {:seed     (rand-int 100)
+                       :size     n
+                       :registry entities-registry})))
+
+(m/=> samples
+  [:=> [:cat [:or entity? :qualified-keyword] pos-int?]
+   [:sequential map?]])
 
 
 ;; =============================================================================

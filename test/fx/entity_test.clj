@@ -119,3 +119,18 @@
                                                     :user (random-uuid)})))))
 
     (ig/halt! system)))
+
+
+
+(deftest entity-samples-test
+  (let [config       (duct/prep-config config)
+        system       (ig/init config)
+        user         (val (ig/find-derived-1 system ::user))
+        role         (val (ig/find-derived-1 system ::role))
+        sample-user  (fx.entity/sample user)
+        sample-roles (fx.entity/samples role 10)]
+
+    (is (fx.entity/valid-entity? user sample-user))
+    (is (every? (partial fx.entity/valid-entity? role) sample-roles))
+
+    (ig/halt! system)))
