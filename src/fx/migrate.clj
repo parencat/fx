@@ -64,6 +64,7 @@
           fx.entity/ident-field-schema
           val
           fx.entity/field-schema
+          (assoc-in [:props :as-reference] true) ;; highlight that type is actually a reference from other entity
           schema->column-type)
 
       (some? enum)
@@ -114,6 +115,10 @@
     [(:or :decimal :numeric 'number?) _] :numeric
     [(:or :real 'float?) _] :real
     [(:or :double 'double?) _] [:double-precision]
+
+    [:smallserial {:as-reference true}] :smallint
+    [:serial {:as-reference true}] :integer
+    [:bigserial {:as-reference true}] :bigint
     [:smallserial _] :smallserial
     [:serial _] :serial
     [:bigserial _] :bigserial
@@ -322,14 +327,25 @@
   "Convert table field map to field constraints map"
   [{:keys [nullable pk-name fkcolumn-name pktable-name column-def non-unique delete-rule]}]
   (cond-> {}
-          (= nullable 1) (assoc :optional true)
+          (= nullable 1)
+          (assoc :optional true)
+
           (and (some? pk-name)
-               (not fkcolumn-name)) (assoc :primary-key true)
-          (some? fkcolumn-name) (assoc :foreign-key pktable-name)
-          (string? column-def) (assoc :default (extract-default-val column-def))
+               (not fkcolumn-name))
+          (assoc :primary-key true)
+
+          (some? fkcolumn-name)
+          (assoc :foreign-key pktable-name)
+
+          (string? column-def)
+          (assoc :default (extract-default-val column-def))
+
           (and (some? non-unique)
-               (not (some? pk-name))) (assoc :unique (not non-unique))
-          (= delete-rule DatabaseMetaData/importedKeyCascade) (assoc :cascade true)))
+               (not (some? pk-name)))
+          (assoc :unique (not non-unique))
+
+          (= delete-rule DatabaseMetaData/importedKeyCascade)
+          (assoc :cascade true)))
 
 (m/=> column->constraints-map
   [:=> [:cat raw-table-field]

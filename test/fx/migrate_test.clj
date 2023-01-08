@@ -524,3 +524,30 @@
             "two courses attached to student")))
 
     (ig/halt! system)))
+
+
+(def item-schema
+  [:spec {:table "item"}
+   [:id {:identity true} :serial]])
+
+(def order-schema
+  [:spec {:table "order"}
+   [:item {:rel-type :one-to-one} ::item]])
+
+
+(deftest handle-serial-references-test
+  (pg/with-datasource ds
+    (let [item-spec  (-> item-schema entity/prepare-spec :spec)
+          item       (entity/create-entity ::item item-spec)
+          order-spec (-> order-schema entity/prepare-spec :spec)
+          order      (entity/create-entity ::order order-spec)
+          ref-type   (-> (sut/entity->columns-ddl order)
+                         first second second)]
+      (is (= ref-type :integer))
+
+      (sut/apply-migrations! {:database ds :entities #{item order}})
+
+      (is (= "integer"
+             (-> (get-columns ds "order")
+                 first
+                 :data-type))))))
