@@ -246,12 +246,12 @@
 (defn table-exist?
   "Checks if table exists in database"
   [^DataSource database table]
-  (let [^Connection conn           (jdbc/get-connection database)
-        ^DatabaseMetaData metadata (.getMetaData conn)
-        ;; TODO pass a schema option as well as table
-        tables                     (-> metadata
-                                       (.getTables nil nil table nil))]
-    (.next tables)))
+  (with-open [^Connection conn (jdbc/get-connection database)]
+    (let [^DatabaseMetaData metadata (.getMetaData conn)
+          ;; TODO pass a schema option as well as table
+          tables                     (-> metadata
+                                         (.getTables nil nil table nil))]
+      (.next tables))))
 
 (m/=> table-exist?
   [:=> [:cat connection? :string]
@@ -277,25 +277,25 @@
 (defn extract-db-columns
   "Returns all table fields metadata"
   [^DataSource database table]
-  (let [^Connection conn           (jdbc/get-connection database)
-        ^DatabaseMetaData metadata (.getMetaData conn)
-        columns                    (-> metadata
-                                       (.getColumns nil "public" table nil) ;; TODO expose schema as option to clients
-                                       (rs/datafiable-result-set database {:builder-fn rs/as-unqualified-kebab-maps})
-                                       index-by-name)
-        primary-keys               (-> metadata
-                                       (.getPrimaryKeys nil nil table)
-                                       (rs/datafiable-result-set database {:builder-fn rs/as-unqualified-kebab-maps})
-                                       index-by-name)
-        foreign-keys               (-> metadata
-                                       (.getImportedKeys nil nil table)
-                                       (rs/datafiable-result-set database {:builder-fn rs/as-unqualified-kebab-maps})
-                                       index-by-name)
-        unique-keys                (-> metadata
-                                       (.getIndexInfo nil nil table true false)
-                                       (rs/datafiable-result-set database {:builder-fn rs/as-unqualified-kebab-maps})
-                                       index-by-name)]
-    (mdl/deep-merge columns primary-keys foreign-keys unique-keys)))
+  (with-open [^Connection conn (jdbc/get-connection database)]
+    (let [^DatabaseMetaData metadata (.getMetaData conn)
+          columns                    (-> metadata
+                                         (.getColumns nil "public" table nil) ;; TODO expose schema as option to clients
+                                         (rs/datafiable-result-set database {:builder-fn rs/as-unqualified-kebab-maps})
+                                         index-by-name)
+          primary-keys               (-> metadata
+                                         (.getPrimaryKeys nil nil table)
+                                         (rs/datafiable-result-set database {:builder-fn rs/as-unqualified-kebab-maps})
+                                         index-by-name)
+          foreign-keys               (-> metadata
+                                         (.getImportedKeys nil nil table)
+                                         (rs/datafiable-result-set database {:builder-fn rs/as-unqualified-kebab-maps})
+                                         index-by-name)
+          unique-keys                (-> metadata
+                                         (.getIndexInfo nil nil table true false)
+                                         (rs/datafiable-result-set database {:builder-fn rs/as-unqualified-kebab-maps})
+                                         index-by-name)]
+      (mdl/deep-merge columns primary-keys foreign-keys unique-keys))))
 
 (def raw-table-field
   [:map
@@ -323,9 +323,13 @@
       default)))
 
 
+(def types-without-defaults
+  #{:smallserial :serial :bigserial})
+
+
 (defn column->constraints-map
   "Convert table field map to field constraints map"
-  [{:keys [nullable pk-name fkcolumn-name pktable-name column-def non-unique delete-rule]}]
+  [{:keys [nullable pk-name fkcolumn-name pktable-name column-def non-unique delete-rule type-name]}]
   (cond-> {}
           (= nullable 1)
           (assoc :optional true)
@@ -337,7 +341,8 @@
           (some? fkcolumn-name)
           (assoc :foreign-key pktable-name)
 
-          (string? column-def)
+          (and (string? column-def)
+               (not (contains? types-without-defaults (keyword type-name))))
           (assoc :default (extract-default-val column-def))
 
           (and (some? non-unique)
@@ -356,6 +361,16 @@
   2147483647)       ;; TODO Not very reliable number
 
 
+(def type-aliases
+  {:int2 :smallint
+   :int4 :integer
+   :int8 :bigint})
+
+
+(defn ensure-type-consistent [type]
+  (get type-aliases type type))
+
+
 (defn get-db-columns
   "Fetches the table fields definition and convert them to simplified Clojure maps"
   [database table]
@@ -365,7 +380,8 @@
        (let [key      (-> column-name
                           (str/replace "_" "-") ;; TODO expose as option to clients
                           keyword)
-             type-key (keyword type-name)
+             type-key (-> (keyword type-name)
+                          ensure-type-consistent)
              type     (if (and (= type-key :varchar) (not= column-size default-column-size))
                         [type-key column-size]
                         type-key)
@@ -707,13 +723,15 @@
   "Reverse operation to interleave function
    e.g. [1 2 3 4] -> ([1 3] [2 4])"
   [coll]
-  (->> coll
-       (partition 2 2 (repeat nil))
-       (apply map vector)))
+  (some->> (seq coll)
+           (partition 2 2 (repeat nil))
+           (apply map vector)))
 
 (m/=> unzip
   [:=> [:cat sequential?]
-   [:sequential {:min 2 :max 2} vector?]])
+   [:or
+    [:sequential {:min 2 :max 2} vector?]
+    :nil]])
 
 
 (def migratable-props
@@ -784,7 +802,7 @@
 (m/=> prep-migrations
   [:=> [:cat connection? [:set fx.entity/entity?]]
    [:map
-    [:migrations [:vector [:vector :string]]]
+    [:migrations [:maybe [:vector [:vector :string]]]]
     [:rollback-migrations [:vector [:maybe [:vector :string]]]]]])
 
 
