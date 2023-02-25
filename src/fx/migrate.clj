@@ -442,9 +442,9 @@
              column-fk   (->constraint-name table column "fkey")]
          (for [[op value] column-spec]
            (match [op value]
-             [:type _] {:alter-column [column-name :type value]}
-             [:optional true] {:alter-column [column-name :set [:not nil]]}
-             [:optional false] {:alter-column [column-name :drop [:not nil]]}
+             [:type _] {:alter-column-raw [column-name :type value]}
+             [:optional true] {:alter-column-raw [column-name :set [:not nil]]}
+             [:optional false] {:alter-column-raw [column-name :drop [:not nil]]}
              [:primary-key true] {:add-index [:primary-key column-name]}
              [:primary-key false] {:drop-index [:primary-key column-name]}
              [:foreign-key ref] {:add-constraint [[:quote column-fk]
@@ -479,19 +479,19 @@
      (for [[column column-spec] columns]
        (let [column-name (->column-name entity column)
              column-fk   (->constraint-name table column "fkey")]
-         (for [[op value] column-spec]
+         (for [[op value] column-spec
+               :when (not= op :type)] ;; type changes handled by ->set-ddl function
            (match [op value]
-             [:optional 0] {:alter-column [column-name :drop [:not nil]]}
+             [:optional 0] {:alter-column-raw [column-name :drop [:not nil]]}
              [:primary-key 0] {:drop-index [:primary-key column-name]}
              [:foreign-key 0] {:drop-constraint [[:quote column-fk]]}
              [:cascade 0] [{:drop-constraint [[:quote column-fk]]}
                            {:add-constraint [[:quote column-fk]
                                              [:foreign-key column-name]
                                              [:references [:quote (get-ref-table entity column)]]]}]
-             [:default 0] {:alter-column [column-name :drop [:default]]}
+             [:default 0] {:alter-column-raw [column-name :drop [:default]]}
              [:unique 0] {:drop-constraint [[:raw (->constraint-name table column "unique")]]}))))
      flatten)))
-
 
 (m/=> ->constraints-drop-ddl
   [:=> [:cat fx.entity/entity? [:map-of :keyword map?]]

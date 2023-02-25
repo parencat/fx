@@ -61,6 +61,18 @@
                  :cascade  true} :some/test-address]])
 
 
+(def person-schema
+  [:spec {:table "person"}
+   [:id {:identity true} :uuid]
+   [:user {:wrap true} :integer]])
+
+
+(def modified-person-schema
+  [:spec {:table "person"}
+   [:id {:identity true} :uuid]
+   [:user {:wrap true} [:string {:max 250}]]])
+
+
 (defn get-columns
   ([ds]
    (get-columns ds "user"))
@@ -150,11 +162,11 @@
                                {:id {:type :uuid :optional true}}
                                {:id {:type :string :primary-key true}})
              {:rollbacks '({:drop-index [:primary-key :id]}
-                           {:alter-column [:id :type :uuid]}
-                           {:alter-column [:id :set [:not nil]]})
-              :updates   '({:alter-column [:id :type :string]}
+                           {:alter-column-raw [:id :type :uuid]}
+                           {:alter-column-raw [:id :set [:not nil]]})
+              :updates   '({:alter-column-raw [:id :type :string]}
                            {:add-index [:primary-key :id]}
-                           {:alter-column [:id :drop [:not nil]]})})))
+                           {:alter-column-raw [:id :drop [:not nil]]})})))
 
     (testing "tables identical"
       (let [{:keys [rollbacks updates]}
@@ -170,11 +182,13 @@
     (let [user-spec      (-> user-schema entity/prepare-spec :spec)
           user-entity    (entity/create-entity :some/test-user user-spec)
           address-spec   (-> address-schema entity/prepare-spec :spec)
-          address-entity (entity/create-entity :some/test-address address-spec)]
+          address-entity (entity/create-entity :some/test-address address-spec)
+          person-spec    (-> person-schema entity/prepare-spec :spec)
+          person-entity  (entity/create-entity :some/test-person person-spec)]
 
       (testing "table create"
         (sut/apply-migrations! {:database ds
-                                :entities #{user-entity address-entity}})
+                                :entities #{user-entity address-entity person-entity}})
 
         (is (sut/table-exist? ds "user"))
         (is (sut/table-exist? ds "address"))
@@ -201,11 +215,26 @@
               id-column (mdl/find-first #(= "id" (:column-name %)) columns)]
           (is (= #{"id" "email"}
                  (->> columns (map :column-name) set)))
-          (is (= "varchar" (:udt-name id-column))))
+          (is (= "varchar" (:udt-name id-column)))))
+
+      (testing "table alter with wrapped column name"
+        (let [person-spec   (-> modified-person-schema entity/prepare-spec :spec)
+              person-entity (entity/create-entity :some/test-person person-spec)]
+
+          (let [columns     (get-columns ds "person")
+                user-column (mdl/find-first #(= "user" (:column-name %)) columns)]
+            (is (= "int4" (:udt-name user-column))))
+
+          (sut/apply-migrations! {:database ds
+                                  :entities #{person-entity}})
+
+          (let [columns     (get-columns ds "person")
+                user-column (mdl/find-first #(= "user" (:column-name %)) columns)]
+            (is (= "varchar" (:udt-name user-column)))))
 
 
         ;; won't work for now
-        ;; needs a very intelligent workaround based on
+        ;; requires a very intelligent workaround based on
         ;; finding all foreign key constraints, dropping them
         ;; and recreating them back
         ;; https://zauner.nllk.net/post/0036-change-primary-key-of-existing-postgresql-table/

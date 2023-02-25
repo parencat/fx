@@ -15,7 +15,7 @@
                  [metosin/malli "0.9.2"]
                  [differ "0.3.3"]
                  [com.github.seancorfield/next.jdbc "1.3.847"]
-                 [com.github.seancorfield/honeysql "2.4.947"]
+                 [com.github.seancorfield/honeysql "2.4.980"]
                  [org.postgresql/postgresql "42.5.1"]
                  [hikari-cp "3.0.1"]
                  [clj-test-containers "0.7.4"]
