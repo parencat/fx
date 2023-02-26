@@ -523,7 +523,7 @@
 
 (defn pg-update!
   "Update record in database"
-  [^DataSource database entity data {:keys [where] :as params}]
+  [^DataSource database entity data {:fx.repo/keys [where] :as params}]
   (let [table        (fx.entity/prop entity :table)
         eq-clauses   (some-> (prep-data-map entity params)
                              (not-empty)
@@ -541,13 +541,13 @@
         connection?
         fx.entity/entity?
         map?
-        [:map [:where {:optional true} vector?]]]
+        [:map [:fx.repo/where {:optional true} vector?]]]
    map?])
 
 
 (defn pg-delete!
   "Delete record from database"
-  [^DataSource database entity {:keys [where] :as params}]
+  [^DataSource database entity {:fx.repo/keys [where] :as params}]
   (let [table        (fx.entity/prop entity :table)
         eq-clauses   (some-> (prep-data-map entity params)
                              (not-empty)
@@ -563,13 +563,13 @@
   [:=> [:cat
         connection?
         fx.entity/entity?
-        [:map [:where {:optional true} vector?]]]
+        [:map [:fx.repo/where {:optional true} vector?]]]
    map?])
 
 
 (defn pg-find!
   "Get single record from the database"
-  [^DataSource database entity {:keys [fields where nested] :as params}] ;; TODO add exclude parameter to filter fields
+  [^DataSource database entity {:fx.repo/keys [fields where nested] :as params}] ;; TODO add exclude parameter to filter fields
   (let [eq-clauses (some-> (prep-data-map entity params)
                            (not-empty)
                            (sql/map=))
@@ -582,6 +582,7 @@
         record     (jdbc/execute-one! database query
                      {:return-keys true
                       :builder-fn  jdbc.rs/as-unqualified-kebab-maps})]
+    (println "nested" nested)
     (if (some? nested)
       (coerce-nested-records entity record)
       record)))
@@ -591,15 +592,15 @@
         connection?
         fx.entity/entity?
         [:map
-         [:fields {:optional true} [:vector :keyword]]
-         [:where {:optional true} vector?]
-         [:nested {:optional true} nested-params?]]]
+         [:fx.repo/fields {:optional true} [:vector :keyword]]
+         [:fx.repo/where {:optional true} vector?]
+         [:fx.repo/nested {:optional true} nested-params?]]]
    [:maybe map?]])
 
 
 (defn pg-find-all!
   "Return multiple records from the database"
-  [^DataSource database entity {:keys [fields where order-by limit offset nested] :as params}]
+  [^DataSource database entity {:fx.repo/keys [fields where order-by limit offset nested] :as params}]
   (let [eq-clauses (some-> (prep-data-map entity params)
                            (not-empty)
                            (sql/map=))
@@ -625,12 +626,12 @@
         connection?
         fx.entity/entity?
         [:map
-         [:fields {:optional true} [:vector :keyword]]
-         [:where {:optional true} vector?]
-         [:nested {:optional true} nested-params?]
-         [:order-by {:optional true} vector?]
-         [:limit {:optional true} :int]
-         [:offset {:optional true} :int]]]
+         [:fx.repo/fields {:optional true} [:vector :keyword]]
+         [:fx.repo/where {:optional true} vector?]
+         [:fx.repo/nested {:optional true} nested-params?]
+         [:fx.repo/order-by {:optional true} vector?]
+         [:fx.repo/limit {:optional true} :int]
+         [:fx.repo/offset {:optional true} :int]]]
    [:maybe [:vector map?]]])
 
 

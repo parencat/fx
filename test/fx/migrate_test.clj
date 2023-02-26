@@ -477,8 +477,8 @@
                  (get-in result [:current-version :id]))))
 
         (testing "crud functions can recognize entities w/o table property and build valid queries"
-          (let [result (fx.repo/find! post {:id     post-id
-                                            :nested true})]
+          (let [result (fx.repo/find! post {:id             post-id
+                                            :fx.repo/nested true})]
             (is (= version-2-id (get-in result [:current-version :id])))
             (is (= user-id (get-in result [:current-version :updated-by])))))))
 
@@ -531,12 +531,12 @@
       (fx.repo/save! course {:id c2-id :title "Course 2"})
       (fx.repo/save! student-course {:student s-id :course c1-id})
 
-      (let [s (fx.repo/find! student {:id s-id :nested true})]
+      (let [s (fx.repo/find! student {:id s-id :fx.repo/nested true})]
         (is (seq (:courses s)))
         (is (some #(= (:id %) c1-id) (:courses s))
             "some of the courses is a saved course"))
 
-      (let [s  (fx.repo/find-all! student {:nested true})
+      (let [s  (fx.repo/find-all! student {:fx.repo/nested true})
             cs (fx.repo/find-all! course)]
         (is (= 1 (count s)))
         (is (= 2 (count cs)))
@@ -545,7 +545,7 @@
 
       (fx.repo/save! student-course {:student s-id :course c2-id})
 
-      (let [s (fx.repo/find! student {:id s-id :nested true})]
+      (let [s (fx.repo/find! student {:id s-id :fx.repo/nested true})]
         (is (= #{c1-id c2-id}
                (->> (:courses s)
                     (map :id)

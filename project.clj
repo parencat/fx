@@ -25,7 +25,8 @@
   :profiles
   {:dev {:source-paths ["dev"]
          :dependencies [[vvvvalvalval/scope-capture "0.3.3-s1"]
-                        [djblue/portal "0.35.1"]]}}
+                        [djblue/portal "0.35.1"]
+                        [eftest "0.5.9"]]}}
 
   :deploy-repositories
   [["clojars" {:sign-releases false

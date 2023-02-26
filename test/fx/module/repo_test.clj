@@ -101,23 +101,23 @@
 
       (testing "using HoneySQL operators"
         (is (= person-id
-               (:id (fx.repo/find! person {:where [:in :id [person-id]]}))))
+               (:id (fx.repo/find! person {:fx.repo/where [:in :id [person-id]]}))))
 
         (is (= person-id
                (:id (fx.repo/find! person {:column "base"
-                                           :where  [:or [:= :name "random name"]
-                                                    [:= :id person-id]]}))))
+                                           :fx.repo/where  [:or [:= :name "random name"]
+                                                            [:= :id person-id]]}))))
 
         (is (= person-id
-               (:id (fx.repo/find! person {:where [:= [:raw "\"column\""] "base"]})))))
+               (:id (fx.repo/find! person {:fx.repo/where [:= [:raw "\"column\""] "base"]})))))
 
       (testing "using :quote function to wrap SQL reserved keywords"
         (is (= person-id
-               (:id (fx.repo/find! person {:where [:= [:quote :column] "base"]})))))
+               (:id (fx.repo/find! person {:fx.repo/where [:= [:quote :column] "base"]})))))
 
       (testing "specifying the returning columns"
         (let [result (fx.repo/find! person {:id     person-id
-                                            :fields [:name]})]
+                                            :fx.repo/fields [:name]})]
           (is (= 1 (count result)))
           (is (= {:name "Mighty Repo"} result)))))
 
@@ -155,17 +155,13 @@
 
       (testing "get user with related post"
         (let [result (fx.repo/find! user {:id     user-id
-                                          :nested true})]
+                                          :fx.repo/nested true})]
           (is (= user-id (:id result)))
           (is (map? (:post result)))
           (is (= post-id (get-in result [:post :id]))))))
 
     (ig/halt! system)))
 
-(comment
- "SELECT *, (SELECT ROW_TO_JSON(\"user_post\") FROM (SELECT * FROM \"post\" WHERE \"id\" = \"user\".\"post\") AS \"user_post\") AS post FROM user WHERE id = ?"
- "SELECT *, (SELECT ROW_TO_JSON(\"user_post\") FROM (SELECT * FROM \"post\" WHERE \"id\" = \"user\".\"post\") AS \"user_post\") AS \"post\" FROM \"user\" WHERE \"id\" = ?"
- nil)
 
 (deftest find-all-test
   (let [config (duct/prep-config config)
@@ -191,14 +187,14 @@
                              :name "Second user"
                              :post post-id})
 
-        (let [result (fx.repo/find-all! user {:nested true})]
+        (let [result (fx.repo/find-all! user {:fx.repo/nested true})]
           (is (= 2 (count result)))))
 
       (testing "get all posts"
         (let [result (fx.repo/find-all! post)]
           (is (= 1 (count result))))
 
-        (let [result     (fx.repo/find-all! post {:nested true})
+        (let [result     (fx.repo/find-all! post {:fx.repo/nested true})
               first-post (first result)]
           (is (= 2 (count (:users first-post))))
           (is (= #{user-id user2-id} (set (map :id (:users first-post))))))))
